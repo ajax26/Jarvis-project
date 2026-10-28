@@ -146,6 +146,18 @@
   }
  },
  {
+  "utterance": "홈니아 핸드 청소기 알려 줘",
+  "expected": {
+   "action": "WEB_SEARCH"
+  }
+ },
+ {
+  "utterance": "이순신 장군은 누구야?",
+  "expected": {
+   "action": "WEB_SEARCH"
+  }
+ },
+ {
   "utterance": "안녕 반가워",
   "expected": {
    "action": "CHITCHAT"

@@ -38,6 +38,7 @@ action별 필드:
 - DEVICE_CONTROL: target(VOLUME), value(UP, DOWN, MUTE, 또는 0~100 사이 숫자 중 하나)
 - SEARCH_SONG: query(노래방 곡 검색어: 제목, 가수, 초성)
 - PLAY_SONG: query(재생할 곡의 제목과 가수)
+- WEB_SEARCH: query(검색할 내용)
 - CHITCHAT: reply(짧은 한국어 답변)
 
 규칙:
@@ -46,7 +47,8 @@ action별 필드:
 - 뉴스 분야가 없으면 category는 "GENERAL".
 - 노래를 찾거나 목록을 보여 달라면 SEARCH_SONG, 노래를 부르거나 틀어/재생/예약해 달라면 PLAY_SONG.
 - query에는 '노래', '찾아줘', '틀어줘' 같은 명령어를 빼고 제목과 가수만 넣는다.
-- 날씨, 뉴스, 기기 제어, 노래 검색/재생이 아니면 CHITCHAT.
+- 상품, 인물, 장소, 회사, 상식 등 정보를 물으면 WEB_SEARCH. query에는 '알려줘' 같은 말을 빼고 검색어만 넣는다.
+- 인사, 기분, 잡담은 CHITCHAT.
 
 예시:
 발화: 오늘 서울 날씨 어때?
@@ -65,6 +67,10 @@ action별 필드:
 {"action":"PLAY_SONG","query":"임영웅 사랑은 늘 도망가"}
 발화: 보고싶다 틀어줘
 {"action":"PLAY_SONG","query":"보고싶다"}
+발화: 다이슨 무선 청소기 알려줘
+{"action":"WEB_SEARCH","query":"다이슨 무선 청소기"}
+발화: 세종대왕은 누구야?
+{"action":"WEB_SEARCH","query":"세종대왕"}
 발화: 안녕
 {"action":"CHITCHAT","reply":"안녕하세요! 무엇을 도와드릴까요?"}
 """.strip()
@@ -117,7 +123,7 @@ def parse(raw: str) -> dict:
         return {"action": action, "category": cat if cat in NEWS_CATEGORIES else "GENERAL"}
     if action == "DEVICE_CONTROL":
         return {"action": action, "target": s("target").upper(), "value": s("value").upper()}
-    if action in ("SEARCH_SONG", "PLAY_SONG") and s("query"):
+    if action in ("SEARCH_SONG", "PLAY_SONG", "WEB_SEARCH") and s("query"):
         return {"action": action, "query": s("query")}
     if action == "CHITCHAT" and s("reply"):
         return {"action": action, "reply": s("reply")}

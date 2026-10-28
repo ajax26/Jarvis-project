@@ -25,6 +25,9 @@ android {
         // same name as backend/.env also accepted
         val kmaKey = localProps.getProperty("kma.authKey") ?: localProps.getProperty("KMA_AUTH_KEY", "")
         buildConfigField("String", "KMA_AUTH_KEY", "\"${kmaKey.trim()}\"")
+        // Naver Search API (developers.naver.com) for web search; without it, Korean Wikipedia is used
+        buildConfigField("String", "NAVER_CLIENT_ID", "\"${localProps.getProperty("NAVER_CLIENT_ID", "").trim()}\"")
+        buildConfigField("String", "NAVER_CLIENT_SECRET", "\"${localProps.getProperty("NAVER_CLIENT_SECRET", "").trim()}\"")
     }
 
     buildFeatures { buildConfig = true }

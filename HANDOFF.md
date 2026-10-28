@@ -79,6 +79,9 @@
    ```
    sdk.dir=C\:/Users/<사용자>/AppData/Local/Android/Sdk
    KMA_AUTH_KEY=<기상청 API허브 인증키>
+   # 선택: 웹 검색 (developers.naver.com 검색 API). 없으면 한국어 위키백과로 검색 (상품 정보는 거의 없음)
+   NAVER_CLIENT_ID=<네이버 Client ID>
+   NAVER_CLIENT_SECRET=<네이버 Client Secret>
    ```
    `backend/.env`에도 `KMA_AUTH_KEY=` (PC 테스트·웹 intent 모드용)
 4. `cd frontend && npm install && npm run build` (HUD 정적 파일 생성 — 앱 빌드 전에 필수)
@@ -97,11 +100,12 @@ adb shell "mv /sdcard/Download/vosk-model-small-ko-0.22 /sdcard/Download/vosk-ko
 
 ## RK3588 남은 일
 
-1. 노래·볼륨 요청을 LLM 없이 규칙으로 처리 (SingTree `parseSongRequest` 참고). "○○ 시작해 줘"가 검색으로 잘못 분류되는 문제 포함
-2. 응답 줄이기: 곡 검색은 첫 곡만, 뉴스는 몇 건만 (지금 곡 목록 14초, 뉴스 33초 읽음)
+1. ~~노래·볼륨 요청 규칙 처리~~ → `ai/IntentRules` (재생 0.27초, 검색 0.06초, 볼륨 0.01초). 곡 검색은 첫 곡만 말함
+2. 뉴스 응답 줄이기 (지금 5건을 31~33초 읽음)
 3. 날짜·시간 질문은 앱이 바로 답하기 ("무슨 요일이야"에 LLM이 답 못 함)
 4. 대기음 OFF는 대기 중 알림 볼륨을 0으로 내림 (Google 인식기 효과음이 알림 소리로 몇 초마다 남). 이 기기에서 앱은 알림 스트림을 음소거만 할 수 있고 해제는 못 함 → 음소거(ADJUST_MUTE) 쓰지 말 것
-5. 호출어가 온라인(Google)이라 "100% 온디바이스" 목표와 다름. 오프라인 호출어가 필요하면 더 큰 Vosk 모델이나 전용 호출어 엔진 검토
+5. 웹 검색(WEB_SEARCH): 상품·인물·지식 질문. 네이버 키가 없으면 위키백과라 상품 질문은 "찾지 못했어요". 평가 25문장 중 LLM 단독 22/25 (규칙 포함 시 "우산 챙겨야 돼?"만 오답)
+6. 호출어가 온라인(Google)이라 "100% 온디바이스" 목표와 다름. 오프라인 호출어가 필요하면 더 큰 Vosk 모델이나 전용 호출어 엔진 검토
 
 ## RK3588 첫 설치 절차 (참고)
 

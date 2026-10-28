@@ -24,6 +24,7 @@ import com.doorskorea.singkro.ai.SpeechOutput
 import com.doorskorea.singkro.ai.WakePhrase
 import com.doorskorea.singkro.ai.WakeWordListener
 import com.doorskorea.singkro.ai.WeatherSource
+import com.doorskorea.singkro.ai.WebSearchSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -91,7 +92,10 @@ class AssistantService : Service() {
                 IntentPrompt.intent("안녕", FAMILY).let { LlmEngine.generate(it.prefix, it.rest) } // cache system prompt
             }
             val grid = KmaGrid(assets.open("kma_grid.json").bufferedReader().use { it.readText() })
-            val handler = IntentHandler(this, FAMILY, WeatherSource(BuildConfig.KMA_AUTH_KEY, grid))
+            val handler = IntentHandler(
+                this, FAMILY, WeatherSource(BuildConfig.KMA_AUTH_KEY, grid),
+                web = WebSearchSource(BuildConfig.NAVER_CLIENT_ID, BuildConfig.NAVER_CLIENT_SECRET),
+            )
             // without the Vosk model the HUD's mic button and typed questions still work, just no wake word
             wake = if (useVosk && vosk.exists()) {
                 withContext(Dispatchers.IO) {

@@ -36,6 +36,11 @@ class IntentParserTest {
         assertTrue(parse("""{"action":"PLAY_SONG","query":""}""") is Unknown)
     }
 
+    @Test fun webSearch() {
+        assertEquals(AssistantIntent.WebSearch("다이슨 청소기"), parse("""{"action":"web_search","query":"다이슨 청소기"}"""))
+        assertTrue(parse("""{"action":"WEB_SEARCH"}""") is Unknown)
+    }
+
     @Test fun chitchat() =
         assertEquals(Chitchat("안녕하세요!"), parse("""{"action":"CHITCHAT","reply":"안녕하세요!"}"""))
 

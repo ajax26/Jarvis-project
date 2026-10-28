@@ -25,6 +25,7 @@ import com.doorskorea.singkro.ai.ModelFamily
 import com.doorskorea.singkro.ai.SpeechInput
 import com.doorskorea.singkro.ai.SpeechOutput
 import com.doorskorea.singkro.ai.WeatherSource
+import com.doorskorea.singkro.ai.WebSearchSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -57,7 +58,10 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handler = IntentHandler(this, family, WeatherSource(BuildConfig.KMA_AUTH_KEY, KmaGrid(assets.open("kma_grid.json").bufferedReader().use { it.readText() })))
+        handler = IntentHandler(
+            this, family, WeatherSource(BuildConfig.KMA_AUTH_KEY, KmaGrid(assets.open("kma_grid.json").bufferedReader().use { it.readText() })),
+            web = WebSearchSource(BuildConfig.NAVER_CLIENT_ID, BuildConfig.NAVER_CLIENT_SECRET),
+        )
         speechIn = SpeechInput(this)
         speechOut = SpeechOutput(this)
 
@@ -251,6 +255,7 @@ class MainActivity : Activity() {
         is AssistantIntent.DeviceControl -> mapOf("action" to "DEVICE_CONTROL", "target" to i.target, "value" to i.value)
         is AssistantIntent.SearchSong -> mapOf("action" to "SEARCH_SONG", "query" to i.query)
         is AssistantIntent.PlaySong -> mapOf("action" to "PLAY_SONG", "query" to i.query)
+        is AssistantIntent.WebSearch -> mapOf("action" to "WEB_SEARCH", "query" to i.query)
         is AssistantIntent.Chitchat -> mapOf("action" to "CHITCHAT", "reply" to i.reply)
         is AssistantIntent.Unknown -> mapOf("action" to "UNKNOWN")
     }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.net.Uri
+import android.text.Html
 import android.util.Log
 import android.util.Xml
 import kotlinx.coroutines.Dispatchers
@@ -28,15 +29,18 @@ class IntentHandler(
     private val weather: WeatherSource,
     private val news: NewsSource = NewsSource(),
     private val songs: SongSource = SongSource(),
+    private val web: WebSearchSource = WebSearchSource(),
 ) {
     private val device = DeviceController(context)
 
     data class Reply(val intent: AssistantIntent, val text: String)
 
     suspend fun handle(utterance: String): Reply {
-        val raw = IntentPrompt.intent(utterance, family).let { LlmEngine.generate(it.prefix, it.rest) }
-        val intent = IntentParser.parse(raw)
-        Log.d(TAG, "intent=$intent")
+        // song and volume requests skip the LLM (~2.7 s on the RK3588)
+        val intent = IntentRules.match(utterance)?.also { Log.d(TAG, "rule intent=$it") }
+            ?: IntentPrompt.intent(utterance, family).let { LlmEngine.generate(it.prefix, it.rest) }
+                .let(IntentParser::parse).also { Log.d(TAG, "intent=$it") }
+                .let { songOrWeb(it, utterance) }
         val text = try {
             when (intent) {
                 is AssistantIntent.GetWeather ->
@@ -45,20 +49,24 @@ class IntentHandler(
                 is AssistantIntent.GetNews -> news.fetch(intent.category)
                 is AssistantIntent.DeviceControl -> device.apply(intent)
                 is AssistantIntent.SearchSong -> {
-                    val found = songs.search(intent.query)
-                    if (found.isEmpty()) "'${intent.query}'에 맞는 곡을 찾지 못했어요."
-                    // read the list as-is: summarising it with the LLM invites made-up titles
-                    else found.mapIndexed { i, s -> "${i + 1}. ${s.title} - ${s.artist} (곡번호 ${s.songNum})" }
-                        .joinToString("\n")
+                    val found = searchSongs(intent.query)
+                    val top = found.firstOrNull()
+                    // only the best match is spoken: reading five results took ~14 s.
+                    // not summarised by the LLM, which invents titles
+                    if (top == null) "'${intent.query}'에 맞는 곡을 찾지 못했어요."
+                    else "${top.artist}의 '${top.title}', 곡번호 ${top.songNum}번" +
+                        (if (found.size > 1) " 외에 ${found.size - 1}곡이 더 있어요." else "이에요.")
                 }
                 is AssistantIntent.PlaySong -> {
-                    val song = songs.search(intent.query, limit = 1).firstOrNull()
+                    val song = searchSongs(intent.query, limit = 1).firstOrNull()
                     if (song == null) "'${intent.query}'에 맞는 곡을 찾지 못했어요."
                     else {
                         songs.play(context, song)
                         "${song.artist} - '${song.title}' 재생할게요."
                     }
                 }
+                is AssistantIntent.WebSearch ->
+                    web.search(intent.query) ?: "'${intent.query}'에 대한 정보를 찾지 못했어요."
                 is AssistantIntent.Chitchat -> intent.reply
                 is AssistantIntent.Unknown -> "죄송해요, 잘 이해하지 못했어요. 다시 말씀해 주세요."
             }
@@ -72,8 +80,26 @@ class IntentHandler(
         return Reply(intent, text)
     }
 
+    /**
+     * With no web search intent the model filed questions like "홈니아 핸드 청소기 알려 줘" as song searches; a song
+     * search from the model with nothing song-like in the utterance goes to the web instead.
+     */
+    private fun songOrWeb(intent: AssistantIntent, utterance: String): AssistantIntent =
+        if (intent is AssistantIntent.SearchSong && !SONG_CUE.containsMatchIn(utterance)) {
+            AssistantIntent.WebSearch(intent.query)
+        } else intent
+
+    /** The catalog needs every word to match, so "아이유의 좋은 날" finds nothing; retry as "아이유 좋은 날". */
+    private suspend fun searchSongs(query: String, limit: Int = 5): List<SongSource.Song> {
+        val found = songs.search(query, limit)
+        val plain = query.replaceFirst(Regex("(\\S)의\\s"), "$1 ")
+        return if (found.isEmpty() && plain != query) songs.search(plain, limit) else found
+    }
+
     private companion object {
         const val TAG = "IntentHandler"
+        // 노래/곡/가수/검색, or 초성 like "ㅈㅇㄴ"
+        val SONG_CUE = Regex("노래|곡|가수|검색|[ㄱ-ㅎ]{2,}")
     }
 }
 
@@ -198,6 +224,70 @@ class SongSource(private val baseUrl: String = "https://singkro1.mycafe24.com") 
     }
 }
 
+/**
+ * Web search for information questions, read as-is (an LLM summary of search snippets invents facts).
+ * Naver Search API when keys are set (Korean web documents, products included); otherwise Korean Wikipedia,
+ * which needs no key but knows little about products.
+ */
+class WebSearchSource(private val naverId: String = "", private val naverSecret: String = "") {
+    suspend fun search(query: String): String? = withContext(Dispatchers.IO) {
+        if (naverId.isNotBlank() && naverSecret.isNotBlank()) naver(query) else wikipedia(query)
+    }
+
+    private fun naver(query: String): String? {
+        val q = URLEncoder.encode(query, "UTF-8")
+        val body = httpGet(
+            "https://openapi.naver.com/v1/search/webkr.json?query=$q&display=3",
+            mapOf("X-Naver-Client-Id" to naverId, "X-Naver-Client-Secret" to naverSecret),
+        )
+        val items = JSONObject(body).getJSONArray("items")
+        val top = (0 until items.length()).map { items.getJSONObject(it) }
+            .firstOrNull { plain(it.optString("description")).length >= 20 } ?: return null
+        return "검색 결과예요. ${plain(top.getString("title"))}. ${short(plain(top.getString("description")))}"
+    }
+
+    private fun wikipedia(query: String): String? {
+        val q = URLEncoder.encode(query, "UTF-8")
+        val ua = mapOf("User-Agent" to "SINGKRO/0.1 (Doors Korea voice assistant)")
+        val body = JSONObject(
+            httpGet("https://ko.wikipedia.org/w/api.php?action=query&list=search&srsearch=$q&srlimit=3&format=json", ua),
+        )
+        val hits = body.optJSONObject("query")?.optJSONArray("search")
+            ?: throw IOException("Wikipedia search: ${body.optJSONObject("error")?.optString("info") ?: body.toString().take(200)}")
+        // full-text search always returns something ("시장 1위 핸드 청소기" -> 삼성전자): only take a page whose
+        // title matches one of the query's words ("세종대왕" -> "세종 (조선)" counts), else report nothing found
+        // rather than read an unrelated article
+        val words = query.split(" ").map { it.trim() }.filter { it.length >= 2 }
+        val title = (0 until hits.length()).map { hits.getJSONObject(it).getString("title") }.firstOrNull { t ->
+            val base = t.substringBefore(" (")
+            base.length >= 2 && words.any { it.startsWith(base) || base.startsWith(it) }
+        } ?: return null
+        val page = URLEncoder.encode(title.replace(' ', '_'), "UTF-8")
+        val extract = JSONObject(httpGet("https://ko.wikipedia.org/api/rest_v1/page/summary/$page", ua))
+            .optString("extract").takeIf { it.isNotBlank() } ?: return null
+        // "(한국 한자: 世宗, 중세 한국어: ·솅조ᇰ, 1397년 ...)" is unreadable aloud
+        var spoken = extract
+        while (true) spoken = PARENS.replace(spoken, "").takeIf { it != spoken } ?: break
+        // the summary API sometimes drops the closing one: "이순신(李舜臣, ... 16일은" -> "이순신은"
+        spoken = UNCLOSED_PAREN.replaceFirst(spoken, "")
+        return "위키백과에 따르면, ${short(spoken.replace(Regex("\\s+([은는이가을를의,.])"), "$1"))}"
+    }
+
+    private companion object {
+        val PARENS = Regex("\\s*\\([^()]*\\)")
+        val UNCLOSED_PAREN = Regex("\\s*\\([^()]*?(?=[은는이가]\\s)")
+    }
+
+    private fun plain(html: String) = Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString().trim()
+
+    /** First two sentences, at most ~160 characters: it's read aloud. */
+    private fun short(text: String): String {
+        val sentences = Regex("[^.!?。]+[.!?。]?").findAll(text).map { it.value.trim() }.filter { it.isNotEmpty() }
+        val two = sentences.take(2).joinToString(" ")
+        return if (two.length <= 160) two else two.take(157).trimEnd() + "..."
+    }
+}
+
 class DeviceController(context: Context) {
     private val audio = context.getSystemService(AudioManager::class.java)
 
@@ -218,8 +308,9 @@ class DeviceController(context: Context) {
     }
 }
 
-private fun httpGet(url: String): String {
+private fun httpGet(url: String, headers: Map<String, String> = emptyMap()): String {
     val conn = URL(url).openConnection() as HttpURLConnection
+    headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
     conn.connectTimeout = 5_000
     // API허브 forecasts (~100 KB) can take several seconds
     conn.readTimeout = 10_000

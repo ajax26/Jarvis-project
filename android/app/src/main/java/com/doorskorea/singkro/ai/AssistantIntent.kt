@@ -9,6 +9,7 @@ sealed interface AssistantIntent {
     data class DeviceControl(val target: String, val value: String) : AssistantIntent
     data class SearchSong(val query: String) : AssistantIntent
     data class PlaySong(val query: String) : AssistantIntent
+    data class WebSearch(val query: String) : AssistantIntent
     data class Chitchat(val reply: String) : AssistantIntent
     data class Unknown(val raw: String) : AssistantIntent
 }
@@ -36,6 +37,9 @@ object IntentParser {
                 ?: AssistantIntent.Unknown(raw)
             "PLAY_SONG" -> obj.str("query").takeIf { it.isNotBlank() }
                 ?.let { AssistantIntent.PlaySong(it) }
+                ?: AssistantIntent.Unknown(raw)
+            "WEB_SEARCH" -> obj.str("query").takeIf { it.isNotBlank() }
+                ?.let { AssistantIntent.WebSearch(it) }
                 ?: AssistantIntent.Unknown(raw)
             "CHITCHAT" -> obj.str("reply").takeIf { it.isNotBlank() }
                 ?.let { AssistantIntent.Chitchat(it) }
