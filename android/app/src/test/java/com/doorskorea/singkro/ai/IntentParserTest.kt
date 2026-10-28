@@ -30,6 +30,12 @@ class IntentParserTest {
     @Test fun deviceControl() =
         assertEquals(DeviceControl("VOLUME", "DOWN"), parse("""{"action":"DEVICE_CONTROL","target":"volume","value":"down"}"""))
 
+    @Test fun songs() {
+        assertEquals(AssistantIntent.SearchSong("아이유"), parse("""{"action":"search_song","query":"아이유"}"""))
+        assertEquals(AssistantIntent.PlaySong("좋은날"), parse("""{"action":"PLAY_SONG","query":" 좋은날 "}"""))
+        assertTrue(parse("""{"action":"PLAY_SONG","query":""}""") is Unknown)
+    }
+
     @Test fun chitchat() =
         assertEquals(Chitchat("안녕하세요!"), parse("""{"action":"CHITCHAT","reply":"안녕하세요!"}"""))
 

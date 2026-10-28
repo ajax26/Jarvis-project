@@ -4,9 +4,11 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
 
-type Message = { type: "system" | "reply" | "user" | "error"; text: string };
+// "play": text holds the Singkro web player URL
+type Message = { type: "system" | "reply" | "user" | "error" | "play"; text: string };
 type ServerEvent =
   | { type: "system"; text: string }
+  | { type: "play"; url: string }
   | { type: "error"; text: string }
   | { type: "delta"; text: string }
   | { type: "start" }
@@ -42,6 +44,8 @@ export default function JarvisConsole() {
         } else if (ev.type === "done") {
           setBusy(false);
           setMessages((m) => m.filter((x) => x.type !== "reply" || x.text));
+        } else if (ev.type === "play") {
+          setMessages((m) => [...m, { type: "play", text: ev.url }]);
         } else {
           setMessages((m) => [...m, { type: ev.type, text: ev.text }]);
         }
@@ -85,7 +89,17 @@ export default function JarvisConsole() {
         className="mb-3 h-36 overflow-y-auto border border-jarvis-line bg-jarvis-dark/60 p-3 font-sans text-sm whitespace-pre-line"
         aria-live="polite"
       >
-        {messages.map((m, i) => (
+        {messages.map((m, i) =>
+          m.type === "play" ? (
+            // a link, not window.open: popups opened from a WebSocket message get blocked
+            /^https?:\/\//.test(m.text) && (
+              <p key={i}>
+                <a href={m.text} target="_blank" rel="noopener noreferrer" className="text-jarvis-neon underline">
+                  ▶ Singkro 플레이어에서 열기
+                </a>
+              </p>
+            )
+          ) : (
           <p
             key={i}
             className={
@@ -94,7 +108,8 @@ export default function JarvisConsole() {
           >
             {m.type === "user" ? m.text : `› ${m.text}`}
           </p>
-        ))}
+          ),
+        )}
       </div>
 
       <form onSubmit={send} className="flex gap-2">

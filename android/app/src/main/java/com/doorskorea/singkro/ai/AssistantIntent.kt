@@ -7,6 +7,8 @@ sealed interface AssistantIntent {
     data class GetWeather(val location: String, val date: String) : AssistantIntent
     data class GetNews(val category: String) : AssistantIntent
     data class DeviceControl(val target: String, val value: String) : AssistantIntent
+    data class SearchSong(val query: String) : AssistantIntent
+    data class PlaySong(val query: String) : AssistantIntent
     data class Chitchat(val reply: String) : AssistantIntent
     data class Unknown(val raw: String) : AssistantIntent
 }
@@ -29,6 +31,12 @@ object IntentParser {
                 target = obj.str("target").uppercase(),
                 value = obj.str("value").uppercase(),
             )
+            "SEARCH_SONG" -> obj.str("query").takeIf { it.isNotBlank() }
+                ?.let { AssistantIntent.SearchSong(it) }
+                ?: AssistantIntent.Unknown(raw)
+            "PLAY_SONG" -> obj.str("query").takeIf { it.isNotBlank() }
+                ?.let { AssistantIntent.PlaySong(it) }
+                ?: AssistantIntent.Unknown(raw)
             "CHITCHAT" -> obj.str("reply").takeIf { it.isNotBlank() }
                 ?.let { AssistantIntent.Chitchat(it) }
                 ?: AssistantIntent.Unknown(raw)

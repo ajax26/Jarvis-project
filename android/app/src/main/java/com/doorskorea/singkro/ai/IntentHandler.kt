@@ -1,7 +1,9 @@
 package com.doorskorea.singkro.ai
 
 import android.content.Context
+import android.content.Intent
 import android.media.AudioManager
+import android.net.Uri
 import android.util.Log
 import android.util.Xml
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +15,7 @@ import java.io.IOException
 import java.io.StringReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -20,10 +23,11 @@ import java.time.format.DateTimeFormatter
 
 /** Utterance in, text for TTS out. */
 class IntentHandler(
-    context: Context,
+    private val context: Context,
     private val family: ModelFamily,
     private val weather: WeatherSource,
     private val news: NewsSource = NewsSource(),
+    private val songs: SongSource = SongSource(),
 ) {
     private val device = DeviceController(context)
 
@@ -38,6 +42,21 @@ class IntentHandler(
                         ?: "${intent.location} 날씨는 아직 지원하지 않는 지역이에요."
                 is AssistantIntent.GetNews -> speakable(utterance, news.fetch(intent.category))
                 is AssistantIntent.DeviceControl -> device.apply(intent)
+                is AssistantIntent.SearchSong -> {
+                    val found = songs.search(intent.query)
+                    if (found.isEmpty()) "'${intent.query}'에 맞는 곡을 찾지 못했어요."
+                    // read the list as-is: summarising it with the LLM invites made-up titles
+                    else found.mapIndexed { i, s -> "${i + 1}. ${s.title} - ${s.artist} (곡번호 ${s.songNum})" }
+                        .joinToString("\n")
+                }
+                is AssistantIntent.PlaySong -> {
+                    val song = songs.search(intent.query, limit = 1).firstOrNull()
+                    if (song == null) "'${intent.query}'에 맞는 곡을 찾지 못했어요."
+                    else {
+                        songs.play(context, song)
+                        "${song.artist} - '${song.title}' 재생할게요."
+                    }
+                }
                 is AssistantIntent.Chitchat -> intent.reply
                 is AssistantIntent.Unknown -> "죄송해요, 잘 이해하지 못했어요. 다시 말씀해 주세요."
             }
@@ -150,6 +169,30 @@ class NewsSource {
             }
         }
         return titles
+    }
+}
+
+/** Singkro web song catalog: matches title, artist, lyricist, composer and 초성 (all words must match). */
+class SongSource(private val baseUrl: String = "https://singkro1.mycafe24.com") {
+    data class Song(val cntsSeq: Long, val songNum: Int, val title: String, val artist: String)
+
+    suspend fun search(query: String, limit: Int = 5): List<Song> = withContext(Dispatchers.IO) {
+        val q = URLEncoder.encode(query, "UTF-8")
+        val items = JSONObject(httpGet("$baseUrl/api/catalog/search?q=$q&limit=$limit")).getJSONArray("items")
+        (0 until items.length()).map { i ->
+            val o = items.getJSONObject(i)
+            Song(o.getLong("cnts_seq"), o.optInt("song_num"), o.getString("title"), o.getString("artist"))
+        }
+    }
+
+    /**
+     * Opens the Singkro web player for the song. Playback needs a logged-in session in that browser.
+     * Android blocks activity starts from the background: run this from a foreground service with
+     * SYSTEM_ALERT_WINDOW granted, or as a system/privileged app on the device image.
+     */
+    fun play(context: Context, song: Song) {
+        val uri = Uri.parse("$baseUrl/player?cnts_seq=${song.cntsSeq}")
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
 

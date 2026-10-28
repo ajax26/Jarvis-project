@@ -94,6 +94,9 @@ async def reply_intent(ws: WebSocket, history: list):
     intent, reply = await asyncio.to_thread(assistant.handle, history[-1]["content"], INTENT_MODEL, family)
     await ws.send_json({"type": "system", "text": "intent " + json.dumps(intent, ensure_ascii=False)})
     await ws.send_json({"type": "delta", "text": reply})
+    if intent.get("url"):
+        # PLAY_SONG: the console shows this as a link to the Singkro web player
+        await ws.send_json({"type": "play", "url": intent["url"]})
     history.append({"role": "assistant", "content": reply})
 
 

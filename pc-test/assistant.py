@@ -20,6 +20,7 @@ import httpx
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 KMA_SERVICE_KEY = os.getenv("KMA_SERVICE_KEY", "")  # data.go.kr URL-encoded key
+SINGKRO_WEB = os.getenv("SINGKRO_WEB", "https://singkro1.mycafe24.com")
 
 # --- keep in sync with IntentPrompt.kt -------------------------------------------------------
 INTENT_SYSTEM = """
@@ -30,13 +31,17 @@ action별 필드:
 - GET_WEATHER: location(도시명), date(today 또는 tomorrow 중 하나)
 - GET_NEWS: category(IT, ECONOMY, SPORTS, SCIENCE, ENTERTAINMENT, GENERAL 중 하나)
 - DEVICE_CONTROL: target(VOLUME), value(UP, DOWN, MUTE, 또는 0~100 사이 숫자 중 하나)
+- SEARCH_SONG: query(노래방 곡 검색어: 제목, 가수, 초성)
+- PLAY_SONG: query(재생할 곡의 제목과 가수)
 - CHITCHAT: reply(짧은 한국어 답변)
 
 규칙:
 - 지역이 없으면 location은 "서울".
 - 날짜가 없으면 date는 "today".
 - 뉴스 분야가 없으면 category는 "GENERAL".
-- 날씨, 뉴스, 기기 제어가 아니면 CHITCHAT.
+- 노래를 찾거나 목록을 보여 달라면 SEARCH_SONG, 노래를 부르거나 틀어/재생/예약해 달라면 PLAY_SONG.
+- query에는 '노래', '찾아줘', '틀어줘' 같은 명령어를 빼고 제목과 가수만 넣는다.
+- 날씨, 뉴스, 기기 제어, 노래 검색/재생이 아니면 CHITCHAT.
 
 예시:
 발화: 오늘 서울 날씨 어때?
@@ -49,6 +54,12 @@ action별 필드:
 {"action":"DEVICE_CONTROL","target":"VOLUME","value":"DOWN"}
 발화: 음소거 해줘
 {"action":"DEVICE_CONTROL","target":"VOLUME","value":"MUTE"}
+발화: 아이유 노래 찾아줘
+{"action":"SEARCH_SONG","query":"아이유"}
+발화: 임영웅 사랑은 늘 도망가 틀어줘
+{"action":"PLAY_SONG","query":"임영웅 사랑은 늘 도망가"}
+발화: 보고싶다 틀어줘
+{"action":"PLAY_SONG","query":"보고싶다"}
 발화: 안녕
 {"action":"CHITCHAT","reply":"안녕하세요! 무엇을 도와드릴까요?"}
 """.strip()
@@ -110,6 +121,8 @@ def parse(raw: str) -> dict:
         return {"action": action, "category": cat if cat in NEWS_CATEGORIES else "GENERAL"}
     if action == "DEVICE_CONTROL":
         return {"action": action, "target": s("target").upper(), "value": s("value").upper()}
+    if action in ("SEARCH_SONG", "PLAY_SONG") and s("query"):
+        return {"action": action, "query": s("query")}
     if action == "CHITCHAT" and s("reply"):
         return {"action": action, "reply": s("reply")}
     return {"action": "UNKNOWN"}
@@ -202,6 +215,17 @@ def fetch_news(category: str, limit=5) -> str:
     return "\n".join(f"{i}. {t}" for i, t in enumerate(titles, 1))
 
 
+def search_songs(query: str, limit=5) -> list[dict]:
+    """Singkro web catalog search: matches title, artist, lyricist, composer and 초성 (all words must match)."""
+    r = httpx.get(f"{SINGKRO_WEB}/api/catalog/search", params={"q": query, "limit": limit}, timeout=5)
+    r.raise_for_status()
+    return r.json()["items"]
+
+
+def player_url(cnts_seq: int) -> str:
+    return f"{SINGKRO_WEB}/player?cnts_seq={cnts_seq}"
+
+
 # --- handler (mirror of IntentHandler.handle) --------------------------------------------------
 def handle(utterance: str, model: str, family: str) -> tuple[dict, str]:
     intent = parse(generate(intent_prompt(utterance, family), model))
@@ -214,6 +238,19 @@ def handle(utterance: str, model: str, family: str) -> tuple[dict, str]:
             return intent, speakable(utterance, info, model, family)
         if action == "GET_NEWS":
             return intent, speakable(utterance, fetch_news(intent["category"]), model, family)
+        if action == "SEARCH_SONG":
+            songs = search_songs(intent["query"])
+            if not songs:
+                return intent, f"'{intent['query']}'에 맞는 곡을 찾지 못했어요."
+            # read the list as-is: summarising it with the LLM invites made-up titles
+            return intent, "\n".join(f"{i}. {x['title']} - {x['artist']} (곡번호 {x['song_num']})" for i, x in enumerate(songs, 1))
+        if action == "PLAY_SONG":
+            songs = search_songs(intent["query"], limit=1)
+            if not songs:
+                return intent, f"'{intent['query']}'에 맞는 곡을 찾지 못했어요."
+            song = songs[0]
+            intent.update(cnts_seq=song["cnts_seq"], url=player_url(song["cnts_seq"]))
+            return intent, f"{song['artist']} - '{song['title']}' 재생할게요."
         if action == "DEVICE_CONTROL":
             # PC has no device: report what Android would do
             return intent, f"[기기 제어] {intent['target']} -> {intent['value']}"
@@ -241,6 +278,12 @@ CASES = [
     ("볼륨 키워줘", {"action": "DEVICE_CONTROL", "target": "VOLUME", "value": "UP"}),
     ("소리 꺼줘", {"action": "DEVICE_CONTROL", "target": "VOLUME", "value": "MUTE"}),
     ("볼륨 30으로 맞춰줘", {"action": "DEVICE_CONTROL", "target": "VOLUME", "value": "30"}),
+    ("아이유 노래 찾아줘", {"action": "SEARCH_SONG", "query": "아이유"}),
+    ("ㅈㅇㄴ 검색해줘", {"action": "SEARCH_SONG", "query": "ㅈㅇㄴ"}),
+    ("트로트 신나는 노래 뭐 있어?", {"action": "SEARCH_SONG"}),
+    ("좋은날 틀어줘", {"action": "PLAY_SONG", "query": "좋은날"}),
+    ("방탄소년단 다이너마이트 예약해줘", {"action": "PLAY_SONG"}),
+    ("나훈아 테스형 부를래", {"action": "PLAY_SONG"}),
     ("안녕 반가워", {"action": "CHITCHAT"}),
     ("너는 누구야?", {"action": "CHITCHAT"}),
     ("심심해", {"action": "CHITCHAT"}),
