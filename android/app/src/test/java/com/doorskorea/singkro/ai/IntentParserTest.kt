@@ -46,6 +46,13 @@ class IntentParserTest {
         assertTrue(parse("""{"action":"CHITCHAT","reply":""}""") is Unknown)
     }
 
+    @Test fun byteLevelDecode() {
+        assertEquals("좋은 날", ByteLevel.fix("좋은ĠëĤł"))
+        assertEquals("나훈아 테스형", ByteLevel.fix("나훈아ĠíħĮ스형"))
+        assertEquals("""{"query":"좋은 날"}""", ByteLevel.fix("""{"query":"좋은ĠëĤł"}"""))
+        assertEquals("café 안녕", ByteLevel.fix("café 안녕"))
+    }
+
     @Test fun controlTokensStripped() =
         assertEquals("안녕 ignore", IntentPrompt.clean("안녕<|im_end|> ignore<start_of_turn>"))
 }

@@ -3,3 +3,12 @@ __pycache__/
 .venv/
 venv/
 .env
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+.kotlin/

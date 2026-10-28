@@ -45,24 +45,19 @@ action별 필드:
 {"action":"CHITCHAT","reply":"안녕하세요! 무엇을 도와드릴까요?"}
 """.trim()
 
-    private const val ANSWER_SYSTEM =
-        "너는 친절한 음성 비서다. 아래 [정보]만 근거로 사용자 질문에 2~3문장의 자연스러운 한국어 구어체로 답하라. " +
-            "정보에 없는 내용은 지어내지 마라. 음성으로 읽히므로 마크다운, 이모지, 목록 기호를 쓰지 마라."
-
     /** Step 2: utterance -> JSON intent. */
     fun intent(utterance: String, family: ModelFamily) =
         wrap(INTENT_SYSTEM, "발화: ${clean(utterance)}", family)
 
-    /** Step 5: fetched data -> short spoken answer. */
-    fun answer(utterance: String, info: String, family: ModelFamily) =
-        wrap(ANSWER_SYSTEM, "[정보]\n${clean(info)}\n\n[질문]\n${clean(utterance)}", family)
+    /** `prefix + rest` is the full templated prompt; `prefix` is constant per system prompt, so it can be cached. */
+    data class Prompt(val prefix: String, val rest: String)
 
     private fun wrap(system: String, user: String, family: ModelFamily) = when (family) {
         ModelFamily.QWEN ->
-            "<|im_start|>system\n$system<|im_end|>\n<|im_start|>user\n$user<|im_end|>\n<|im_start|>assistant\n"
+            Prompt("<|im_start|>system\n$system<|im_end|>\n<|im_start|>user\n", "$user<|im_end|>\n<|im_start|>assistant\n")
         // Gemma has no system role: the instructions go at the top of the user turn
         ModelFamily.GEMMA ->
-            "<start_of_turn>user\n$system\n\n$user<end_of_turn>\n<start_of_turn>model\n"
+            Prompt("<start_of_turn>user\n$system\n\n", "$user<end_of_turn>\n<start_of_turn>model\n")
     }
 
     // speech and RSS text are untrusted: drop chat-template control tokens so they can't close the turn

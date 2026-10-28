@@ -13,13 +13,18 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
 import httpx
+from dotenv import load_dotenv
+
+# secrets come from backend/.env (git-ignored) or the environment
+load_dotenv(Path(__file__).resolve().parent.parent / "backend" / ".env")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-KMA_SERVICE_KEY = os.getenv("KMA_SERVICE_KEY", "")  # data.go.kr URL-encoded key
+KMA_AUTH_KEY = os.getenv("KMA_AUTH_KEY", "")  # 기상청 API허브 (apihub.kma.go.kr) authKey
 SINGKRO_WEB = os.getenv("SINGKRO_WEB", "https://singkro1.mycafe24.com")
 
 # --- keep in sync with IntentPrompt.kt -------------------------------------------------------
@@ -64,11 +69,6 @@ action별 필드:
 {"action":"CHITCHAT","reply":"안녕하세요! 무엇을 도와드릴까요?"}
 """.strip()
 
-ANSWER_SYSTEM = (
-    "너는 친절한 음성 비서다. 아래 [정보]만 근거로 사용자 질문에 2~3문장의 자연스러운 한국어 구어체로 답하라. "
-    "정보에 없는 내용은 지어내지 마라. 음성으로 읽히므로 마크다운, 이모지, 목록 기호를 쓰지 마라."
-)
-
 CONTROL_TOKENS = re.compile(r"<\|im_(start|end)\|>|<(start|end)_of_turn>")
 
 
@@ -84,10 +84,6 @@ def wrap(system: str, user: str, family: str) -> str:
 
 def intent_prompt(utterance: str, family: str) -> str:
     return wrap(INTENT_SYSTEM, f"발화: {clean(utterance)}", family)
-
-
-def answer_prompt(utterance: str, info: str, family: str) -> str:
-    return wrap(ANSWER_SYSTEM, f"[정보]\n{clean(info)}\n\n[질문]\n{clean(utterance)}", family)
 
 
 # --- keep in sync with AssistantIntent.kt ----------------------------------------------------
@@ -150,7 +146,7 @@ GRID = {
     "서울": (60, 127), "부산": (98, 76), "대구": (89, 90), "인천": (55, 124), "광주": (58, 74),
     "대전": (67, 100), "울산": (102, 84), "세종": (66, 103), "수원": (60, 121), "제주": (52, 38),
 }
-SKY = {"1": "맑음", "3": "구름 많음", "4": "흐림"}
+SKY = {"1": "맑고", "3": "구름이 많고", "4": "흐리고"}
 PTY = {"1": "비", "2": "비 또는 눈", "3": "눈", "4": "소나기"}
 KST = timezone(timedelta(hours=9))  # Korea has no DST; avoids needing tzdata on Windows
 
@@ -159,22 +155,32 @@ def fetch_weather(location: str, date: str) -> str | None:
     city = next((c for c in GRID if location.startswith(c)), None)
     if city is None:
         return None
-    if not KMA_SERVICE_KEY:
-        raise RuntimeError("KMA_SERVICE_KEY not set")
+    if not KMA_AUTH_KEY:
+        raise RuntimeError("KMA_AUTH_KEY not set")
     nx, ny = GRID[city]
     now = datetime.now(KST) - timedelta(minutes=15)
     base_hour = next((h for h in (23, 20, 17, 14, 11, 8, 5, 2) if h <= now.hour), None)
     base_date = now.date() if base_hour is not None else now.date() - timedelta(days=1)
     target = (datetime.now(KST).date() + timedelta(days=1 if date == "tomorrow" else 0)).strftime("%Y%m%d")
-    url = (
-        "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
-        f"?serviceKey={KMA_SERVICE_KEY}&pageNo=1&numOfRows=1000&dataType=JSON"
-        f"&base_date={base_date:%Y%m%d}&base_time={(base_hour if base_hour is not None else 23):02d}00"
-        f"&nx={nx}&ny={ny}"
-    )
-    r = httpx.get(url, timeout=5)
+    params = {
+        "pageNo": 1, "numOfRows": 1000, "dataType": "JSON",
+        "base_date": f"{base_date:%Y%m%d}", "base_time": f"{(base_hour if base_hour is not None else 23):02d}00",
+        "nx": nx, "ny": ny, "authKey": KMA_AUTH_KEY,
+    }
+    url = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst"
+    # API허브 occasionally times out or answers 200 with an empty body; one retry clears it
+    for attempt in range(2):
+        try:
+            r = httpx.get(url, params=params, timeout=10)
+            body = r.json()
+            break
+        except (ValueError, httpx.TimeoutException):
+            if attempt:
+                raise
+    if "result" in body:  # API허브 gateway error, e.g. {"result": {"status": 401, "message": "유효한 인증키가 아닙니다."}}
+        raise RuntimeError(f"KMA API허브 {body['result'].get('status')}: {body['result'].get('message')}")
     r.raise_for_status()
-    resp = r.json()["response"]
+    resp = body["response"]
     if resp["header"]["resultCode"] != "00":
         raise RuntimeError(f"KMA error {resp['header'].get('resultMsg')}")
 
@@ -193,13 +199,16 @@ def fetch_weather(location: str, date: str) -> str | None:
             pty = v
     if not temps:
         raise RuntimeError(f"no forecast for {target}")
+    # spoken as-is (no LLM rewrite): instant and nothing can be made up
     day = "내일" if date == "tomorrow" else "오늘"
+    rain = f"{PTY[pty]} 소식이 있어요" if pty else "비 소식은 없어요"
     return (
-        f"{city} {day} 날씨: 하늘 {SKY.get(sky, '정보 없음')}, 강수 {PTY.get(pty, '없음')}, "
-        f"기온 최저 {min(temps)}도 최고 {max(temps)}도, 강수확률 최대 {pop}%"
+        f"{day} {city} 날씨는 {SKY[sky] + ' ' if sky in SKY else ''}{rain}. "
+        f"기온은 최저 {min(temps)}도, 최고 {max(temps)}도이고 강수확률은 최대 {pop}%예요."
     )
 
 
+NEWS_NAMES = {"IT": "IT", "ECONOMY": "경제", "SPORTS": "스포츠", "SCIENCE": "과학", "ENTERTAINMENT": "연예", "GENERAL": "주요"}
 TOPICS = {"IT": "TECHNOLOGY", "ECONOMY": "BUSINESS", "SPORTS": "SPORTS", "SCIENCE": "SCIENCE", "ENTERTAINMENT": "ENTERTAINMENT"}
 
 
@@ -212,7 +221,8 @@ def fetch_news(category: str, limit=5) -> str:
     titles = [t.text.rsplit(" - ", 1)[0].strip() for t in ET.fromstring(r.text).iterfind("./channel/item/title")][:limit]
     if not titles:
         raise RuntimeError("empty news feed")
-    return "\n".join(f"{i}. {t}" for i, t in enumerate(titles, 1))
+    # headlines are read as-is: an LLM summary of them distorted facts in testing
+    return f"최신 {NEWS_NAMES.get(category, '주요')} 뉴스예요.\n" + "\n".join(f"{i}. {t}" for i, t in enumerate(titles, 1))
 
 
 def search_songs(query: str, limit=5) -> list[dict]:
@@ -235,9 +245,9 @@ def handle(utterance: str, model: str, family: str) -> tuple[dict, str]:
             info = fetch_weather(intent["location"], intent["date"])
             if info is None:
                 return intent, f"{intent['location']} 날씨는 아직 지원하지 않는 지역이에요."
-            return intent, speakable(utterance, info, model, family)
+            return intent, info
         if action == "GET_NEWS":
-            return intent, speakable(utterance, fetch_news(intent["category"]), model, family)
+            return intent, fetch_news(intent["category"])
         if action == "SEARCH_SONG":
             songs = search_songs(intent["query"])
             if not songs:
@@ -257,36 +267,17 @@ def handle(utterance: str, model: str, family: str) -> tuple[dict, str]:
         if action == "CHITCHAT":
             return intent, intent["reply"]
     except (httpx.HTTPError, RuntimeError, KeyError, ValueError, ET.ParseError) as e:
-        return intent, f"지금은 정보를 가져올 수 없어요. ({e})"
+        # httpx errors quote the request URL, which carries the auth key
+        detail = str(e).replace(KMA_AUTH_KEY, "***") if KMA_AUTH_KEY else str(e)
+        return intent, f"지금은 정보를 가져올 수 없어요. ({detail})"
     return intent, "죄송해요, 잘 이해하지 못했어요. 다시 말씀해 주세요."
 
 
-def speakable(utterance: str, info: str, model: str, family: str) -> str:
-    return generate(answer_prompt(utterance, info, family), model, temperature=0.3, top_k=20).strip() or info
-
-
 # --- eval -------------------------------------------------------------------------------------
+# shared with the Android app (bundled as an asset), so PC and device runs score the same set
 CASES = [
-    ("오늘 서울 날씨 어때?", {"action": "GET_WEATHER", "location": "서울", "date": "today"}),
-    ("내일 대구 비 와?", {"action": "GET_WEATHER", "location": "대구", "date": "tomorrow"}),
-    ("우산 챙겨야 돼?", {"action": "GET_WEATHER", "location": "서울", "date": "today"}),
-    ("제주도 내일 날씨 알려줘", {"action": "GET_WEATHER", "date": "tomorrow"}),
-    ("최신 IT 뉴스 읽어줘", {"action": "GET_NEWS", "category": "IT"}),
-    ("경제 뉴스 좀 알려줘", {"action": "GET_NEWS", "category": "ECONOMY"}),
-    ("오늘 무슨 일 있었어? 뉴스 들려줘", {"action": "GET_NEWS", "category": "GENERAL"}),
-    ("야구 소식 알려줘", {"action": "GET_NEWS", "category": "SPORTS"}),
-    ("볼륨 키워줘", {"action": "DEVICE_CONTROL", "target": "VOLUME", "value": "UP"}),
-    ("소리 꺼줘", {"action": "DEVICE_CONTROL", "target": "VOLUME", "value": "MUTE"}),
-    ("볼륨 30으로 맞춰줘", {"action": "DEVICE_CONTROL", "target": "VOLUME", "value": "30"}),
-    ("아이유 노래 찾아줘", {"action": "SEARCH_SONG", "query": "아이유"}),
-    ("ㅈㅇㄴ 검색해줘", {"action": "SEARCH_SONG", "query": "ㅈㅇㄴ"}),
-    ("트로트 신나는 노래 뭐 있어?", {"action": "SEARCH_SONG"}),
-    ("좋은날 틀어줘", {"action": "PLAY_SONG", "query": "좋은날"}),
-    ("방탄소년단 다이너마이트 예약해줘", {"action": "PLAY_SONG"}),
-    ("나훈아 테스형 부를래", {"action": "PLAY_SONG"}),
-    ("안녕 반가워", {"action": "CHITCHAT"}),
-    ("너는 누구야?", {"action": "CHITCHAT"}),
-    ("심심해", {"action": "CHITCHAT"}),
+    (c["utterance"], c["expected"])
+    for c in json.load(open(Path(__file__).resolve().parent.parent / "eval" / "intent_cases.json", encoding="utf-8"))
 ]
 
 
@@ -297,7 +288,8 @@ def run_eval(model: str, family: str):
         raw = generate(intent_prompt(utterance, family), model)
         times.append(time.perf_counter() - t0)
         got = parse(raw)
-        hit = all(got.get(k) == v for k, v in expected.items())
+        # spacing-insensitive: "좋은 날" and "좋은날" hit the same catalog search
+        hit = all(str(got.get(k, "")).replace(" ", "") == v.replace(" ", "") for k, v in expected.items())
         ok += hit
         print(f"{'OK  ' if hit else 'FAIL'} {times[-1]:5.1f}s  {utterance}  ->  {raw.strip()[:120]}")
     print(f"\n{model}: {ok}/{len(CASES)} correct, avg {sum(times) / len(times):.1f}s per intent")

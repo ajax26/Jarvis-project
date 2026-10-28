@@ -1,0 +1,142 @@
+[
+ {
+  "utterance": "오늘 서울 날씨 어때?",
+  "expected": {
+   "action": "GET_WEATHER",
+   "location": "서울",
+   "date": "today"
+  }
+ },
+ {
+  "utterance": "내일 대구 비 와?",
+  "expected": {
+   "action": "GET_WEATHER",
+   "location": "대구",
+   "date": "tomorrow"
+  }
+ },
+ {
+  "utterance": "우산 챙겨야 돼?",
+  "expected": {
+   "action": "GET_WEATHER",
+   "location": "서울",
+   "date": "today"
+  }
+ },
+ {
+  "utterance": "제주도 내일 날씨 알려줘",
+  "expected": {
+   "action": "GET_WEATHER",
+   "date": "tomorrow"
+  }
+ },
+ {
+  "utterance": "최신 IT 뉴스 읽어줘",
+  "expected": {
+   "action": "GET_NEWS",
+   "category": "IT"
+  }
+ },
+ {
+  "utterance": "경제 뉴스 좀 알려줘",
+  "expected": {
+   "action": "GET_NEWS",
+   "category": "ECONOMY"
+  }
+ },
+ {
+  "utterance": "오늘 무슨 일 있었어? 뉴스 들려줘",
+  "expected": {
+   "action": "GET_NEWS",
+   "category": "GENERAL"
+  }
+ },
+ {
+  "utterance": "야구 소식 알려줘",
+  "expected": {
+   "action": "GET_NEWS",
+   "category": "SPORTS"
+  }
+ },
+ {
+  "utterance": "볼륨 키워줘",
+  "expected": {
+   "action": "DEVICE_CONTROL",
+   "target": "VOLUME",
+   "value": "UP"
+  }
+ },
+ {
+  "utterance": "소리 꺼줘",
+  "expected": {
+   "action": "DEVICE_CONTROL",
+   "target": "VOLUME",
+   "value": "MUTE"
+  }
+ },
+ {
+  "utterance": "볼륨 30으로 맞춰줘",
+  "expected": {
+   "action": "DEVICE_CONTROL",
+   "target": "VOLUME",
+   "value": "30"
+  }
+ },
+ {
+  "utterance": "아이유 노래 찾아줘",
+  "expected": {
+   "action": "SEARCH_SONG",
+   "query": "아이유"
+  }
+ },
+ {
+  "utterance": "ㅈㅇㄴ 검색해줘",
+  "expected": {
+   "action": "SEARCH_SONG",
+   "query": "ㅈㅇㄴ"
+  }
+ },
+ {
+  "utterance": "트로트 신나는 노래 뭐 있어?",
+  "expected": {
+   "action": "SEARCH_SONG"
+  }
+ },
+ {
+  "utterance": "좋은날 틀어줘",
+  "expected": {
+   "action": "PLAY_SONG",
+   "query": "좋은날"
+  }
+ },
+ {
+  "utterance": "방탄소년단 다이너마이트 예약해줘",
+  "expected": {
+   "action": "PLAY_SONG"
+  }
+ },
+ {
+  "utterance": "나훈아 테스형 부를래",
+  "expected": {
+   "action": "PLAY_SONG"
+  }
+ },
+ {
+  "utterance": "안녕 반가워",
+  "expected": {
+   "action": "CHITCHAT"
+  }
+ },
+ {
+  "utterance": "너는 누구야?",
+  "expected": {
+   "action": "CHITCHAT"
+  }
+ },
+ {
+  "utterance": "심심해",
+  "expected": {
+   "action": "CHITCHAT"
+  }
+ }
+]

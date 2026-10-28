@@ -21,7 +21,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** Utterance in, text for TTS out. */
+/** Utterance in, text for TTS out (plus the parsed intent, for logging and the test screen). */
 class IntentHandler(
     private val context: Context,
     private val family: ModelFamily,
@@ -31,16 +31,18 @@ class IntentHandler(
 ) {
     private val device = DeviceController(context)
 
-    suspend fun handle(utterance: String): String {
-        val raw = LlmEngine.generate(IntentPrompt.intent(utterance, family))
+    data class Reply(val intent: AssistantIntent, val text: String)
+
+    suspend fun handle(utterance: String): Reply {
+        val raw = IntentPrompt.intent(utterance, family).let { LlmEngine.generate(it.prefix, it.rest) }
         val intent = IntentParser.parse(raw)
         Log.d(TAG, "intent=$intent")
-        return try {
+        val text = try {
             when (intent) {
                 is AssistantIntent.GetWeather ->
-                    weather.fetch(intent.location, intent.date)?.let { speakable(utterance, it) }
+                    weather.fetch(intent.location, intent.date)
                         ?: "${intent.location} 날씨는 아직 지원하지 않는 지역이에요."
-                is AssistantIntent.GetNews -> speakable(utterance, news.fetch(intent.category))
+                is AssistantIntent.GetNews -> news.fetch(intent.category)
                 is AssistantIntent.DeviceControl -> device.apply(intent)
                 is AssistantIntent.SearchSong -> {
                     val found = songs.search(intent.query)
@@ -67,22 +69,16 @@ class IntentHandler(
             Log.w(TAG, "bad API response", e)
             "지금은 정보를 가져올 수 없어요."
         }
+        return Reply(intent, text)
     }
-
-    // fetched text goes back into the LLM to become a short spoken answer;
-    // to save ~seconds per request, return `info` directly to TTS instead
-    private suspend fun speakable(utterance: String, info: String) =
-        LlmEngine.generate(IntentPrompt.answer(utterance, info, family), temperature = 0.3f, topK = 20)
-            .trim()
-            .ifBlank { info }
 
     private companion object {
         const val TAG = "IntentHandler"
     }
 }
 
-/** 기상청 단기예보 (data.go.kr VilageFcstInfoService_2.0). `serviceKey` is the URL-encoded key from data.go.kr. */
-class WeatherSource(private val serviceKey: String) {
+/** 기상청 단기예보 via 기상청 API허브 (apihub.kma.go.kr, VilageFcstInfoService_2.0). */
+class WeatherSource(private val authKey: String) {
     // shortcut: fixed KMA grid for major cities; add lat/lon -> grid (LCC) conversion to support any location
     private val grid = mapOf(
         "서울" to (60 to 127), "부산" to (98 to 76), "대구" to (89 to 90), "인천" to (55 to 124),
@@ -91,7 +87,7 @@ class WeatherSource(private val serviceKey: String) {
     )
     private val kst = ZoneId.of("Asia/Seoul")
     private val ymd = DateTimeFormatter.BASIC_ISO_DATE
-    private val skyText = mapOf("1" to "맑음", "3" to "구름 많음", "4" to "흐림")
+    private val skyText = mapOf("1" to "맑고", "3" to "구름이 많고", "4" to "흐리고")
     private val ptyText = mapOf("1" to "비", "2" to "비 또는 눈", "3" to "눈", "4" to "소나기")
 
     /** Returns a one-line summary, or null if the location is not supported. */
@@ -105,12 +101,17 @@ class WeatherSource(private val serviceKey: String) {
         val baseDate = if (baseHour == null) now.toLocalDate().minusDays(1) else now.toLocalDate()
         val target = LocalDate.now(kst).plusDays(if (date == "tomorrow") 1 else 0).format(ymd)
 
-        val url = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst" +
-            "?serviceKey=$serviceKey&pageNo=1&numOfRows=1000&dataType=JSON" +
+        if (authKey.isBlank()) throw IOException("KMA auth key not set (local.properties kma.authKey)")
+        val url = "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst" +
+            "?authKey=${URLEncoder.encode(authKey, "UTF-8")}&pageNo=1&numOfRows=1000&dataType=JSON" +
             "&base_date=${baseDate.format(ymd)}&base_time=%02d00".format(baseHour ?: 23) +
             "&nx=${xy.first}&ny=${xy.second}"
 
-        val response = JSONObject(httpGet(url)).getJSONObject("response")
+        // API허브 occasionally times out or answers 200 with an empty body; one retry clears it
+        val body = JSONObject(runCatching { httpGet(url) }.getOrNull()?.takeIf { it.isNotBlank() } ?: httpGet(url))
+        // API허브 gateway errors come as {"result": {"status": 401, "message": "..."}}
+        body.optJSONObject("result")?.let { throw IOException("KMA API허브 ${it.optInt("status")}: ${it.optString("message")}") }
+        val response = body.getJSONObject("response")
         val header = response.getJSONObject("header")
         if (header.getString("resultCode") != "00") throw IOException("KMA error ${header.optString("resultMsg")}")
         val items = response.getJSONObject("body").getJSONObject("items").getJSONArray("item")
@@ -132,14 +133,20 @@ class WeatherSource(private val serviceKey: String) {
         }
         if (temps.isEmpty()) throw IOException("no forecast for $target")
 
+        // spoken as-is (no LLM rewrite): instant and nothing can be made up
         val day = if (date == "tomorrow") "내일" else "오늘"
-        "$city $day 날씨: 하늘 ${skyText[sky] ?: "정보 없음"}, 강수 ${ptyText[pty] ?: "없음"}, " +
-            "기온 최저 ${temps.min()}도 최고 ${temps.max()}도, 강수확률 최대 $pop%"
+        val rain = ptyText[pty]?.let { "$it 소식이 있어요" } ?: "비 소식은 없어요"
+        "$day $city 날씨는 ${skyText[sky]?.let { "$it " } ?: ""}$rain. " +
+            "기온은 최저 ${temps.min()}도, 최고 ${temps.max()}도이고 강수확률은 최대 $pop%예요."
     }
 }
 
 /** Google News RSS (Korean edition). Check the feed's terms before commercial use; swap in licensed press RSS if needed. */
 class NewsSource {
+    private val names = mapOf(
+        "IT" to "IT", "ECONOMY" to "경제", "SPORTS" to "스포츠",
+        "SCIENCE" to "과학", "ENTERTAINMENT" to "연예", "GENERAL" to "주요",
+    )
     private val topics = mapOf(
         "IT" to "TECHNOLOGY", "ECONOMY" to "BUSINESS", "SPORTS" to "SPORTS",
         "SCIENCE" to "SCIENCE", "ENTERTAINMENT" to "ENTERTAINMENT",
@@ -152,7 +159,8 @@ class NewsSource {
             ?: "https://news.google.com/rss?$locale"
         val titles = parseTitles(httpGet(url), limit)
         if (titles.isEmpty()) throw IOException("empty news feed")
-        titles.mapIndexed { i, t -> "${i + 1}. $t" }.joinToString("\n")
+        // headlines are read as-is: an LLM summary of them distorted facts in testing
+        "최신 ${names[category] ?: "주요"} 뉴스예요.\n" + titles.mapIndexed { i, t -> "${i + 1}. $t" }.joinToString("\n")
     }
 
     private fun parseTitles(xml: String, limit: Int): List<String> {
@@ -219,7 +227,8 @@ class DeviceController(context: Context) {
 private fun httpGet(url: String): String {
     val conn = URL(url).openConnection() as HttpURLConnection
     conn.connectTimeout = 5_000
-    conn.readTimeout = 5_000
+    // API허브 forecasts (~100 KB) can take several seconds
+    conn.readTimeout = 10_000
     try {
         // host only: the full URL carries the API key
         if (conn.responseCode != 200) throw IOException("HTTP ${conn.responseCode} from ${conn.url.host}")
