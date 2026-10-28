@@ -4,6 +4,10 @@
     <!-- weather API, news RSS, Singkro song catalog -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- always-on assistant: microphone foreground service with a status notification -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Android 11+ package visibility: needed to find the speech recognizer and TTS engines -->
     <queries>
@@ -19,14 +23,31 @@
         android:label="SINGKRO 비서"
         android:theme="@android:style/Theme.DeviceDefault"
         android:largeHeap="true">
+        <!-- main screen: web HUD (dot sphere) driven by AssistantService -->
         <activity
-            android:name=".MainActivity"
+            android:name=".HudActivity"
             android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- developer test screen: model load, single asks, intent eval -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="SINGKRO 테스트"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".AssistantService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 </manifest>

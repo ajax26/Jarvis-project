@@ -13,6 +13,23 @@ const points = Array.from({ length: COUNT }, (_, i) => {
   return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, lat: Math.asin(y), lon: a };
 });
 
+export type AssistantState = "idle" | "listening" | "thinking" | "speaking";
+
+const STATE_EVENT = "singkro-state";
+
+/** Lets the console drive the sphere without sharing React state. */
+export function setSphereState(state: AssistantState) {
+  window.dispatchEvent(new CustomEvent<AssistantState>(STATE_EVENT, { detail: state }));
+}
+
+// spin: rad/s, ripple: surface displacement, pulse: whole-sphere breathing (speaking)
+const MOTION: Record<AssistantState, { spin: number; ripple: number; pulse: number }> = {
+  idle: { spin: 0.35, ripple: 0.07, pulse: 0 },
+  listening: { spin: 0.5, ripple: 0.16, pulse: 0 },
+  thinking: { spin: 1.6, ripple: 0.05, pulse: 0 },
+  speaking: { spin: 0.5, ripple: 0.09, pulse: 0.06 },
+};
+
 export default function DotSphere({ className = "" }: { className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -21,6 +38,13 @@ export default function DotSphere({ className = "" }: { className?: string }) {
     const ctx = canvas.getContext("2d")!;
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let w = 0, h = 0, raf = 0;
+    let target = MOTION.idle;
+    const m = { ...MOTION.idle };
+    let angle = 0, last = 0;
+    const onState = (e: Event) => {
+      target = MOTION[(e as CustomEvent<AssistantState>).detail] ?? MOTION.idle;
+    };
+    window.addEventListener(STATE_EVENT, onState);
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
@@ -36,16 +60,25 @@ export default function DotSphere({ className = "" }: { className?: string }) {
 
     const draw = (ms: number) => {
       const t = ms / 1000;
-      const R = Math.min(w, h) * 0.38;
+      const dt = Math.min(t - last, 0.1);
+      last = t;
+      // ease toward the current state's motion so changes don't jump
+      const ease = 1 - Math.exp(-dt * 4);
+      m.spin += (target.spin - m.spin) * ease;
+      m.ripple += (target.ripple - m.ripple) * ease;
+      m.pulse += (target.pulse - m.pulse) * ease;
+      angle += m.spin * dt;
+
+      const R = Math.min(w, h) * 0.38 * (1 + m.pulse * Math.sin(t * 9));
       const cx = w / 2, cy = h / 2, f = R * 3;
-      const ry = t * 0.35, rx = Math.sin(t * 0.25) * 0.4;
+      const ry = angle, rx = Math.sin(t * 0.25) * 0.4;
       const cY = Math.cos(ry), sY = Math.sin(ry), cX = Math.cos(rx), sX = Math.sin(rx);
 
       ctx.clearRect(0, 0, w, h);
 
       for (const p of points) {
         // ripple bands travelling across the surface
-        const k = 1 + 0.07 * Math.sin(p.lat * 6 - t * 2.2) * Math.cos(p.lon * 0.5 + t);
+        const k = 1 + m.ripple * Math.sin(p.lat * 6 - t * 2.2) * Math.cos(p.lon * 0.5 + t);
         const x0 = p.x * k, y0 = p.y * k, z0 = p.z * k;
         const x1 = x0 * cY + z0 * sY;
         const z1 = -x0 * sY + z0 * cY;
@@ -54,7 +87,7 @@ export default function DotSphere({ className = "" }: { className?: string }) {
 
         const s = f / (f + z2 * R);
         const depth = (1 - z2) / 2; // 1 = front, 0 = back
-        const hot = k > 1.05;
+        const hot = k > 1 + m.ripple * 0.7;
         // back #536684 -> front #98A9C4, ripple crests #DCE3EF
         ctx.fillStyle = hot
           ? `rgba(220,227,239,${0.4 + depth * 0.6})`
@@ -71,6 +104,7 @@ export default function DotSphere({ className = "" }: { className?: string }) {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      window.removeEventListener(STATE_EVENT, onState);
     };
   }, []);
 

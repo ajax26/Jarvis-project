@@ -8,9 +8,13 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.Locale
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 
 /**
@@ -100,11 +104,25 @@ class SpeechOutput(context: Context) {
     var ready: Boolean? = null
         private set
 
+    // utterances awaited by speakAndWait, keyed by utterance id
+    private val pending = ConcurrentHashMap<String, CancellableContinuation<Unit>>()
+
     init {
         tts = TextToSpeech(context.applicationContext) { status ->
             ready = status == TextToSpeech.SUCCESS && tts.setLanguage(Locale.KOREAN) >= TextToSpeech.LANG_AVAILABLE
             Log.i(TAG, "TTS ready=$ready engine=${tts.defaultEngine}")
         }
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String) {}
+            override fun onDone(utteranceId: String) = finish(utteranceId)
+            @Deprecated("required override") override fun onError(utteranceId: String) = finish(utteranceId)
+            // QUEUE_FLUSH or stop() interrupts without onDone
+            override fun onStop(utteranceId: String, interrupted: Boolean) = finish(utteranceId)
+        })
+    }
+
+    private fun finish(utteranceId: String) {
+        pending.remove(utteranceId)?.let { if (it.isActive) it.resume(Unit) }
     }
 
     fun speak(text: String) {
@@ -113,6 +131,23 @@ class SpeechOutput(context: Context) {
             return
         }
         tts.speak(forSpeech(text), TextToSpeech.QUEUE_FLUSH, null, "reply")
+    }
+
+    /** Speaks and returns when playback has finished, so the microphone can be reopened without hearing it. */
+    suspend fun speakAndWait(text: String) {
+        if (ready != true) {
+            Log.w(TAG, "TTS not ready, skipping")
+            return
+        }
+        suspendCancellableCoroutine { cont ->
+            val id = UUID.randomUUID().toString()
+            pending[id] = cont
+            cont.invokeOnCancellation {
+                pending.remove(id)
+                tts.stop()
+            }
+            tts.speak(forSpeech(text), TextToSpeech.QUEUE_FLUSH, null, id)
+        }
     }
 
     fun stop() = tts.stop()

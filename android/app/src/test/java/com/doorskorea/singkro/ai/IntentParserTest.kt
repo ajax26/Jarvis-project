@@ -65,6 +65,17 @@ class IntentParserTest {
         assertEquals(null, grid.resolve("없는동네"))
     }
 
+    @Test fun wakeWord() {
+        val t = setOf("싱크", "신키")
+        assertTrue(WakeWordListener.heard("싱크 오늘 날씨 어때", partial = false, tokens = t))
+        assertTrue(WakeWordListener.heard("저기 신키", partial = false, tokens = t))
+        assertTrue(!WakeWordListener.heard("싱크대 청소 해야 지", partial = false, tokens = t))
+        assertTrue(!WakeWordListener.heard("싱크로 노래방", partial = false, tokens = t))
+        // a partial's last word may still grow into 싱크대
+        assertTrue(!WakeWordListener.heard("싱크", partial = true, tokens = t))
+        assertTrue(WakeWordListener.heard("싱크 오늘", partial = true, tokens = t))
+    }
+
     @Test fun controlTokensStripped() =
         assertEquals("안녕 ignore", IntentPrompt.clean("안녕<|im_end|> ignore<start_of_turn>"))
 }

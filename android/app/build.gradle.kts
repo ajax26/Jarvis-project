@@ -32,6 +32,8 @@ android {
     // shared with pc-test/: intent eval cases, region -> KMA grid table
     sourceSets["main"].assets.srcDir("../../eval")
     sourceSets["main"].assets.srcDir("../../data")
+    // web HUD: run `npm run build` in frontend/ first (static export to frontend/out)
+    sourceSets["main"].assets.srcDir("../../frontend/out")
     // data/ also holds the 기상청 source xlsx/docx and the build script; ship only the json
     androidResources { ignoreAssetsPatterns += listOf("*.xlsx", "*.docx", "*.py") }
 
@@ -44,6 +46,10 @@ android {
 dependencies {
     implementation("com.google.mediapipe:tasks-genai:0.10.35")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // offline wake word (model pushed separately, see AssistantService.voskDir)
+    implementation("com.alphacephei:vosk-android:0.3.75")
+    // serves the bundled web HUD over https in the WebView (HudActivity)
+    implementation("androidx.webkit:webkit:1.18.0")
 
     testImplementation("junit:junit:4.13.2")
     // android.jar's org.json is a stub in JVM unit tests

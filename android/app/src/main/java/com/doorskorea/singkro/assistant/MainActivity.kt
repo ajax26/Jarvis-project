@@ -49,7 +49,7 @@ class MainActivity : Activity() {
     private lateinit var speechOut: SpeechOutput
     private var readyText = ""
 
-    private val modelFile get() = File(getExternalFilesDir(null), "model.task")
+    private val modelFile get() = AssistantService.modelFile(this)
 
     // CPU by default: on the MT8781 tablet GPU took ~21 s per intent vs ~3 s on CPU. To try GPU:
     // adb shell am start -n com.doorskorea.singkro.assistant/.MainActivity --es backend GPU
@@ -80,6 +80,7 @@ class MainActivity : Activity() {
                 addView(input, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
                 addView(Button(context).apply { text = "보내기"; setOnClickListener { sendInput() } })
                 addView(Button(context).apply { text = "평가 실행"; setOnClickListener { runEval() } })
+                addView(Button(context).apply { text = "상시 대기"; setOnClickListener { toggleService(this) } })
             })
             addView(ScrollView(context).apply { addView(log) }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
         }
@@ -155,6 +156,24 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_MIC && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) listen()
+    }
+
+    // always-on mode: wake word "씽크" in a foreground service (AssistantService)
+    private var serviceOn = false
+
+    private fun toggleService(button: Button) {
+        val needed = buildList {
+            add(Manifest.permission.RECORD_AUDIO)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+        }.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (needed.isNotEmpty()) {
+            requestPermissions(needed.toTypedArray(), REQ_SERVICE)
+            return
+        }
+        serviceOn = !serviceOn
+        if (serviceOn) AssistantService.start(this) else AssistantService.stop(this)
+        button.text = if (serviceOn) "대기 중지" else "상시 대기"
+        append(if (serviceOn) "상시 대기 시작: '씽크'라고 불러 보세요. (상태는 알림에 표시)\n" else "상시 대기 중지\n")
     }
 
     private fun listen() {
@@ -245,5 +264,6 @@ class MainActivity : Activity() {
         const val TAG = "SingkroMain"
         const val EVAL_TAG = "SingkroEval"
         const val REQ_MIC = 1
+        const val REQ_SERVICE = 2
     }
 }
