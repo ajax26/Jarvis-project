@@ -1,5 +1,7 @@
 package com.doorskorea.singkro.assistant
 
+import android.content.Context
+import android.content.SharedPreferences
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +32,27 @@ object AssistantBus {
     /** idle | listening | thinking | speaking (drives the sphere animation) */
     val state = _state.asStateFlow()
 
+    private var prefs: SharedPreferences? = null
+    private val _wakeSound = MutableStateFlow(false)
+    /** HUD toggle: hear the recognizer's start/stop chimes while waiting for the wake word (off = muted) */
+    val wakeSound = _wakeSound.asStateFlow()
+
+    /** Loads saved settings; call from the service and the HUD before using them. */
+    fun init(context: Context) {
+        if (prefs != null) return
+        prefs = context.applicationContext.getSharedPreferences("assistant", Context.MODE_PRIVATE).also {
+            _wakeSound.value = it.getBoolean(PREF_WAKE_SOUND, false)
+        }
+    }
+
+    fun setWakeSound(on: Boolean) {
+        _wakeSound.value = on
+        prefs?.edit()?.putBoolean(PREF_WAKE_SOUND, on)?.apply()
+        settings()
+    }
+
+    fun settings() = emit(JSONObject().put("type", "settings").put("wakeSound", _wakeSound.value))
+
     fun setState(s: String) {
         _state.value = s
         emit(JSONObject().put("type", "state").put("state", s))
@@ -42,7 +65,20 @@ object AssistantBus {
     fun replyText(text: String) = emit(JSONObject().put("type", "delta").put("text", text))
     fun replyDone() = emit(JSONObject().put("type", "done"))
 
+    /**
+     * Microphone status for the HUD. mode: "wake" (waiting for the wake word) | "ask" (listening to a question)
+     * | "off"; level 0..1; clipped when the input hits full scale (mic gain too high).
+     */
+    fun mic(mode: String, level: Float = 0f, clipped: Boolean = false) = emit(
+        JSONObject().put("type", "mic").put("mode", mode).put("level", level.toDouble()).put("clipped", clipped),
+    )
+
+    /** What the wake word recognizer transcribed, so a missed wake word can be seen on screen. */
+    fun heard(text: String) = emit(JSONObject().put("type", "heard").put("text", text))
+
     private fun emit(json: JSONObject) {
         _events.tryEmit(json.toString())
     }
+
+    private const val PREF_WAKE_SOUND = "wake_sound"
 }

@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -23,9 +25,12 @@ import kotlin.coroutines.resume
  * Create and call on the main thread.
  */
 class SpeechInput(private val context: Context) {
+    private val prefs = context.getSharedPreferences("speech", Context.MODE_PRIVATE)
+    // skip an on-device recognizer that already failed on this device, instead of waiting it out on every start
     private var onDevice = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-        SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+        SpeechRecognizer.isOnDeviceRecognitionAvailable(context) && !prefs.getBoolean(PREF_ON_DEVICE_UNUSABLE, false)
     private var recognizer = create()
+    private val handler = Handler(Looper.getMainLooper())
 
     /** "on-device" or "default", for diagnostics. */
     val engine get() = if (onDevice) "on-device" else "default"
@@ -39,21 +44,35 @@ class SpeechInput(private val context: Context) {
         if (onDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
         else SpeechRecognizer.createSpeechRecognizer(context)
 
-    /** Listens for one utterance; returns null if nothing was recognised (see [lastError]). */
-    suspend fun listen(onPartial: (String) -> Unit = {}): String? {
-        val text = listenOnce(onPartial)
-        // on-device recognizer without the Korean pack: switch to the default recognizer for good and retry
-        if (text == null && onDevice && lastError in LANGUAGE_ERRORS) {
-            Log.w(TAG, "on-device recognizer lacks Korean (error $lastError), using default recognizer")
+    /**
+     * Listens for one utterance; returns null if nothing was recognised (see [lastError]).
+     * [onRms] gets the recognizer's input level in dB (roughly -2..10) while it listens.
+     */
+    suspend fun listen(onPartial: (String) -> Unit = {}, onRms: (Float) -> Unit = {}): String? {
+        val text = listenOnce(onPartial, onRms)
+        // on-device recognizer without the Korean pack, or one that never starts (RK3588: the system's on-device
+        // service isn't a real RecognitionService, bind fails with no callback): switch to the default for good
+        if (text == null && onDevice && (lastError in LANGUAGE_ERRORS || lastError == ERROR_NEVER_STARTED)) {
+            Log.w(TAG, "on-device recognizer unusable (error $lastError), using default recognizer")
             recognizer.destroy()
             onDevice = false
+            prefs.edit().putBoolean(PREF_ON_DEVICE_UNUSABLE, true).apply()
             recognizer = create()
-            return listenOnce(onPartial)
+            return listenOnce(onPartial, onRms)
         }
         return text
     }
 
-    private suspend fun listenOnce(onPartial: (String) -> Unit): String? = suspendCancellableCoroutine { cont ->
+    private suspend fun listenOnce(onPartial: (String) -> Unit, onRms: (Float) -> Unit): String? = suspendCancellableCoroutine { cont ->
+        val watchdog = Runnable {
+            if (cont.isActive) {
+                Log.w(TAG, "recognizer did not start within ${START_TIMEOUT_MS} ms ($engine)")
+                lastError = ERROR_NEVER_STARTED
+                recognizer.cancel()
+                cont.resume(null)
+            }
+        }
+        handler.postDelayed(watchdog, START_TIMEOUT_MS)
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle) {
                 lastError = null
@@ -65,14 +84,17 @@ class SpeechInput(private val context: Context) {
             }
 
             override fun onError(error: Int) {
-                Log.w(TAG, "recognition error $error ($engine)")
+                handler.removeCallbacks(watchdog)
+                // 6/7 (speech timeout, no match) are routine while waiting for the wake word
+                if (error == 6 || error == 7) Log.d(TAG, "recognition error $error ($engine)")
+                else Log.w(TAG, "recognition error $error ($engine)")
                 lastError = error
                 if (cont.isActive) cont.resume(null)
             }
 
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) = handler.removeCallbacks(watchdog)
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onRmsChanged(rmsdB: Float) = onRms(rmsdB)
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -83,8 +105,14 @@ class SpeechInput(private val context: Context) {
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                // end the utterance sooner after the user stops talking (a hint; Google may apply its own minimum)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, END_SILENCE_MS)
+                .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, END_SILENCE_MS)
         )
-        cont.invokeOnCancellation { recognizer.cancel() }
+        cont.invokeOnCancellation {
+            handler.removeCallbacks(watchdog)
+            recognizer.cancel()
+        }
     }
 
     fun destroy() = recognizer.destroy()
@@ -93,6 +121,11 @@ class SpeechInput(private val context: Context) {
         const val TAG = "SpeechInput"
         // ERROR_LANGUAGE_NOT_SUPPORTED, ERROR_LANGUAGE_UNAVAILABLE (API 31)
         val LANGUAGE_ERRORS = setOf(12, 13)
+        // ours, not a SpeechRecognizer code: no onReadyForSpeech/onError within START_TIMEOUT_MS
+        const val ERROR_NEVER_STARTED = -1
+        const val START_TIMEOUT_MS = 3000L
+        const val END_SILENCE_MS = 700L
+        const val PREF_ON_DEVICE_UNUSABLE = "on_device_unusable"
     }
 }
 

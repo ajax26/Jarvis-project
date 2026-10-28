@@ -23,8 +23,8 @@ export default function Home() {
         <span>DOORS KOREA</span>
       </header>
 
-      {/* central reactor */}
-      <div className="relative flex h-[min(80vw,26rem)] w-[min(80vw,26rem)] items-center justify-center" role="status" aria-label="SINGKRO loading">
+      {/* central reactor; also capped by height so the console fits on short landscape screens (RK3588 1080p HUD) */}
+      <div className="relative flex h-[min(80vw,26rem,38vh)] w-[min(80vw,26rem,38vh)] items-center justify-center" role="status" aria-label="SINGKRO loading">
         <div className="absolute inset-0 animate-spin-slow rounded-full border border-dashed border-jarvis-neon/30" />
         <div className="absolute inset-3 animate-spin-reverse rounded-full border border-transparent border-t-jarvis-neon/70 border-b-jarvis-blue/70" />
         <div className="absolute inset-[30%] rounded-full bg-jarvis-neon/10 blur-3xl" />

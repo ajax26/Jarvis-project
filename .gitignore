@@ -12,3 +12,6 @@ android/local.properties
 android/.idea/
 *.iml
 .kotlin/
+
+# on-device model files (downloaded locally, too large for git)
+models/

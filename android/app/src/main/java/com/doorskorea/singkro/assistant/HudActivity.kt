@@ -27,6 +27,7 @@ class HudActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AssistantBus.init(this)
         // https origin for the bundled files: Next.js uses absolute /_next/... paths that file:// can't serve
         val assets = WebViewAssetLoader.Builder()
             .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
@@ -44,6 +45,7 @@ class HudActivity : Activity() {
                 override fun onPageFinished(view: WebView, url: String) {
                     // the page missed earlier events: give it the current state
                     send(JSONObject().put("type", "state").put("state", AssistantBus.state.value).toString())
+                    AssistantBus.settings()
                 }
             }
         }
@@ -91,6 +93,9 @@ class HudActivity : Activity() {
         fun listen() {
             AssistantBus.requests.trySend(AssistantBus.Request.Listen)
         }
+
+        @JavascriptInterface
+        fun setWakeSound(on: Boolean) = AssistantBus.setWakeSound(on)
     }
 
     private companion object {

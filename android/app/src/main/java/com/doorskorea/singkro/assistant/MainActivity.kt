@@ -158,7 +158,7 @@ class MainActivity : Activity() {
         if (requestCode == REQ_MIC && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) listen()
     }
 
-    // always-on mode: wake word "씽크" in a foreground service (AssistantService)
+    // always-on mode: wake word "씽씽" in a foreground service (AssistantService)
     private var serviceOn = false
 
     private fun toggleService(button: Button) {
@@ -173,7 +173,7 @@ class MainActivity : Activity() {
         serviceOn = !serviceOn
         if (serviceOn) AssistantService.start(this) else AssistantService.stop(this)
         button.text = if (serviceOn) "대기 중지" else "상시 대기"
-        append(if (serviceOn) "상시 대기 시작: '씽크'라고 불러 보세요. (상태는 알림에 표시)\n" else "상시 대기 중지\n")
+        append(if (serviceOn) "상시 대기 시작: '씽씽'이라고 불러 보세요. (상태는 알림에 표시)\n" else "상시 대기 중지\n")
     }
 
     private fun listen() {
