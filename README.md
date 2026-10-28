@@ -1,4 +1,4 @@
-# JARVIS Project
+# SINGKRO Project (Doors Korea AI assistant)
 
 ```
 backend/   FastAPI (REST + WebSocket, port 8000)

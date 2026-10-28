@@ -6,21 +6,21 @@ const config: Config = {
     extend: {
       colors: {
         jarvis: {
-          black: "#05070a",
-          dark: "#0b0f14",
-          gray: "#141a21",
-          line: "#1f2a35",
-          neon: "#00f0ff",
-          blue: "#00d2ff",
-          dim: "#0a6b78",
+          black: "#111522",
+          dark: "#1E2638",
+          gray: "#1E2638",
+          line: "#303D59",
+          dim: "#536684",
+          blue: "#98A9C4",
+          neon: "#DCE3EF",
         },
       },
       fontFamily: {
         hud: ["var(--font-hud)", "ui-monospace", "monospace"],
       },
       boxShadow: {
-        neon: "0 0 8px #00f0ff, 0 0 24px rgba(0,240,255,0.45)",
-        "neon-lg": "0 0 16px #00f0ff, 0 0 48px rgba(0,210,255,0.5), inset 0 0 24px rgba(0,240,255,0.25)",
+        neon: "0 0 8px #98A9C4, 0 0 24px rgba(220,227,239,0.3)",
+        "neon-lg": "0 0 16px #98A9C4, 0 0 48px rgba(152,169,196,0.4), inset 0 0 24px rgba(220,227,239,0.2)",
       },
       keyframes: {
         "spin-reverse": { to: { transform: "rotate(-360deg)" } },

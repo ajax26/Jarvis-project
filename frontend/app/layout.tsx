@@ -5,8 +5,8 @@ import "./globals.css";
 const hud = Orbitron({ subsets: ["latin"], variable: "--font-hud" });
 
 export const metadata: Metadata = {
-  title: "J.A.R.V.I.S.",
-  description: "Just A Rather Very Intelligent System",
+  title: "SINGKRO",
+  description: "도어스코리아 AI 어시스턴트",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -1,3 +1,6 @@
+import DotSphere from "@/components/DotSphere";
+import JarvisConsole from "@/components/JarvisConsole";
+
 const corners = [
   "top-4 left-4 border-t-2 border-l-2",
   "top-4 right-4 border-t-2 border-r-2",
@@ -17,21 +20,23 @@ export default function Home() {
 
       <header className="absolute top-8 flex w-full justify-between px-16 text-xs tracking-[0.3em] text-jarvis-blue/70">
         <span>SYS // ONLINE</span>
-        <span>STARK INDUSTRIES</span>
+        <span>DOORS KOREA</span>
       </header>
 
       {/* central reactor */}
-      <div className="relative flex h-80 w-80 items-center justify-center" role="status" aria-label="JARVIS loading">
-        <div className="absolute inset-0 animate-spin-slow rounded-full border border-dashed border-jarvis-neon/40" />
-        <div className="absolute inset-6 animate-spin-reverse rounded-full border-2 border-transparent border-t-jarvis-neon border-b-jarvis-blue shadow-neon" />
-        <div className="absolute inset-14 animate-spin-mid rounded-full border-4 border-jarvis-line border-l-jarvis-neon border-r-jarvis-neon" />
-        <div className="absolute inset-24 animate-pulse-glow rounded-full border border-jarvis-neon bg-jarvis-gray shadow-neon-lg" />
-        <span className="relative text-lg font-bold tracking-[0.4em] text-jarvis-neon drop-shadow-[0_0_6px_#00f0ff]">
-          JARVIS
+      <div className="relative flex h-[min(80vw,26rem)] w-[min(80vw,26rem)] items-center justify-center" role="status" aria-label="SINGKRO loading">
+        <div className="absolute inset-0 animate-spin-slow rounded-full border border-dashed border-jarvis-neon/30" />
+        <div className="absolute inset-3 animate-spin-reverse rounded-full border border-transparent border-t-jarvis-neon/70 border-b-jarvis-blue/70" />
+        <div className="absolute inset-[30%] rounded-full bg-jarvis-neon/10 blur-3xl" />
+        <DotSphere className="absolute inset-0 h-full w-full" />
+        <span className="relative text-lg font-bold tracking-[0.4em] text-jarvis-neon drop-shadow-[0_0_6px_#98A9C4]">
+          SINGKRO
         </span>
       </div>
 
-      <p className="mt-12 text-sm tracking-[0.5em] text-jarvis-blue/80">INITIALIZING...</p>
+      <div className="mt-6">
+        <JarvisConsole />
+      </div>
 
       <footer className="absolute bottom-8 flex w-full justify-between px-16 text-[10px] tracking-[0.3em] text-jarvis-dim">
         <span>WS://localhost:8000/ws</span>
