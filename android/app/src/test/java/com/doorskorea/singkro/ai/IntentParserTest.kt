@@ -1,0 +1,45 @@
+package com.doorskorea.singkro.ai
+
+import com.doorskorea.singkro.ai.AssistantIntent.Chitchat
+import com.doorskorea.singkro.ai.AssistantIntent.DeviceControl
+import com.doorskorea.singkro.ai.AssistantIntent.GetNews
+import com.doorskorea.singkro.ai.AssistantIntent.GetWeather
+import com.doorskorea.singkro.ai.AssistantIntent.Unknown
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+// needs testImplementation("org.json:json:20240303"): android.jar's org.json is a stub in JVM tests
+class IntentParserTest {
+    private fun parse(s: String) = IntentParser.parse(s)
+
+    @Test fun weather() =
+        assertEquals(GetWeather("서울", "today"), parse("""{"action":"GET_WEATHER","location":"서울","date":"today"}"""))
+
+    @Test fun weatherDefaultsAndKoreanDate() {
+        assertEquals(GetWeather("서울", "today"), parse("""{"action":"GET_WEATHER","location":null}"""))
+        assertEquals(GetWeather("부산", "tomorrow"), parse("""{"action":"GET_WEATHER","location":"부산","date":"내일"}"""))
+    }
+
+    @Test fun fencedJsonWithChatter() =
+        assertEquals(GetNews("IT"), parse("물론이죠!\n```json\n{\"action\":\"get_news\",\"category\":\"it\"}\n```"))
+
+    @Test fun unknownNewsCategoryFallsBackToGeneral() =
+        assertEquals(GetNews("GENERAL"), parse("""{"action":"GET_NEWS","category":"요리"}"""))
+
+    @Test fun deviceControl() =
+        assertEquals(DeviceControl("VOLUME", "DOWN"), parse("""{"action":"DEVICE_CONTROL","target":"volume","value":"down"}"""))
+
+    @Test fun chitchat() =
+        assertEquals(Chitchat("안녕하세요!"), parse("""{"action":"CHITCHAT","reply":"안녕하세요!"}"""))
+
+    @Test fun invalidOutputs() {
+        assertTrue(parse("모르겠어요") is Unknown)
+        assertTrue(parse("""{"action":"GET_WEATHER",""") is Unknown)
+        assertTrue(parse("""{"action":"FLY"}""") is Unknown)
+        assertTrue(parse("""{"action":"CHITCHAT","reply":""}""") is Unknown)
+    }
+
+    @Test fun controlTokensStripped() =
+        assertEquals("안녕 ignore", IntentPrompt.clean("안녕<|im_end|> ignore<start_of_turn>"))
+}
