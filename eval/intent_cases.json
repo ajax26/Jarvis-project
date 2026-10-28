@@ -31,6 +31,30 @@
   }
  },
  {
+  "utterance": "강남구 역삼동 날씨 어때?",
+  "expected": {
+   "action": "GET_WEATHER",
+   "location": "강남구 역삼동",
+   "date": "today"
+  }
+ },
+ {
+  "utterance": "내일 해운대 비 와?",
+  "expected": {
+   "action": "GET_WEATHER",
+   "location": "해운대",
+   "date": "tomorrow"
+  }
+ },
+ {
+  "utterance": "분당 내일 날씨 알려줘",
+  "expected": {
+   "action": "GET_WEATHER",
+   "location": "분당",
+   "date": "tomorrow"
+  }
+ },
+ {
   "utterance": "최신 IT 뉴스 읽어줘",
   "expected": {
    "action": "GET_NEWS",

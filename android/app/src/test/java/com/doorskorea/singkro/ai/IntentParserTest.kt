@@ -53,6 +53,18 @@ class IntentParserTest {
         assertEquals("café 안녕", ByteLevel.fix("café 안녕"))
     }
 
+    @Test fun kmaGrid() {
+        // unit tests run from android/app
+        val grid = KmaGrid(java.io.File("../../data/kma_grid.json").readText())
+        assertEquals(60 to 127, grid.resolve("서울"))
+        assertEquals(52 to 38, grid.resolve("제주도"))
+        assertEquals(61 to 125, grid.resolve("강남구 역삼동"))
+        assertEquals(grid.resolve("해운대구"), grid.resolve("부산 해운대"))
+        assertEquals(59 to 74, grid.resolve("광주"))
+        assertEquals(65 to 123, grid.resolve("경기 광주"))
+        assertEquals(null, grid.resolve("없는동네"))
+    }
+
     @Test fun controlTokensStripped() =
         assertEquals("안녕 ignore", IntentPrompt.clean("안녕<|im_end|> ignore<start_of_turn>"))
 }

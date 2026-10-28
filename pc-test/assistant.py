@@ -41,7 +41,7 @@ action별 필드:
 - CHITCHAT: reply(짧은 한국어 답변)
 
 규칙:
-- 지역이 없으면 location은 "서울".
+- 지역이 없으면 location은 "서울". 지역이 있으면 시, 구, 동 이름을 말한 그대로 넣는다.
 - 날짜가 없으면 date는 "today".
 - 뉴스 분야가 없으면 category는 "GENERAL".
 - 노래를 찾거나 목록을 보여 달라면 SEARCH_SONG, 노래를 부르거나 틀어/재생/예약해 달라면 PLAY_SONG.
@@ -142,22 +142,68 @@ def generate(prompt: str, model: str, temperature=0.1, top_k=1) -> str:
 
 
 # --- data sources (keep in sync with IntentHandler.kt) ----------------------------------------
-GRID = {
-    "서울": (60, 127), "부산": (98, 76), "대구": (89, 90), "인천": (55, 124), "광주": (58, 74),
-    "대전": (67, 100), "울산": (102, 84), "세종": (66, 103), "수원": (60, 121), "제주": (52, 38),
+REGION_SUFFIX = re.compile(r"(특별자치시|특별자치도|특별시|광역시|도|시|군|구|동|읍|면)$")
+
+
+def norm_region(name: str) -> str:
+    """'서울특별시' -> '서울', '역삼1동' -> '역삼1', '제주도' -> '제주'."""
+    s = name.replace(" ", "")
+    return REGION_SUFFIX.sub("", s) or s
+
+
+# [시도, 시군구, 읍면동, nx, ny] for every 행정구역 (data/build_kma_grid.py); names pre-normalised once
+GRID_ROWS = [
+    ([norm_region(n) for n in row[:3] if n], row[3], row[4])
+    for row in json.load(open(Path(__file__).resolve().parent.parent / "data" / "kma_grid.json", encoding="utf-8"))
+]
+
+
+# everyday names missing from the official list (2026 file merged 광주광역시 into 전남광주통합특별시);
+# applied only when the whole location is the alias, so "경기 광주" still means 경기도 광주시
+REGION_ALIASES = {
+    "광주": "전남광주통합특별시 서구", "광주광역시": "전남광주통합특별시 서구",
+    "전남": "전남광주통합특별시", "전라남도": "전남광주통합특별시", "전북": "전북특별자치도", "전라북도": "전북특별자치도",
+    "충북": "충청북도", "충남": "충청남도", "경북": "경상북도", "경남": "경상남도",
 }
+
+
+def resolve_region(location: str) -> tuple[int, int] | None:
+    """'강남구 역삼동' -> (61, 125). Every word must match a different level (exact, else prefix);
+    the most general match wins, so '서울' is 서울특별시 and '강남' is 강남구, not some 강남동."""
+    location = REGION_ALIASES.get(location.strip(), location)
+    tokens = [norm_region(t) for t in location.split()]
+    best = None
+    for names, nx, ny in GRID_ROWS:
+        used, exact = set(), 0
+        for t in tokens:
+            i = next((i for i, n in enumerate(names) if i not in used and n == t), None)
+            if i is None:
+                i = next((i for i, n in enumerate(names) if i not in used and n.startswith(t)), None)
+            else:
+                exact += 1
+            if i is None:
+                break
+            used.add(i)
+        else:
+            key = (len(names), -exact)
+            if best is None or key < best[0]:
+                best = (key, nx, ny)
+    return best and best[1:]
+
+
 SKY = {"1": "맑고", "3": "구름이 많고", "4": "흐리고"}
 PTY = {"1": "비", "2": "비 또는 눈", "3": "눈", "4": "소나기"}
 KST = timezone(timedelta(hours=9))  # Korea has no DST; avoids needing tzdata on Windows
 
 
 def fetch_weather(location: str, date: str) -> str | None:
-    city = next((c for c in GRID if location.startswith(c)), None)
-    if city is None:
+    grid = resolve_region(location)
+    if grid is None:
         return None
     if not KMA_AUTH_KEY:
         raise RuntimeError("KMA_AUTH_KEY not set")
-    nx, ny = GRID[city]
+    nx, ny = grid
+    city = location  # spoken back as the user said it
     now = datetime.now(KST) - timedelta(minutes=15)
     base_hour = next((h for h in (23, 20, 17, 14, 11, 8, 5, 2) if h <= now.hour), None)
     base_date = now.date() if base_hour is not None else now.date() - timedelta(days=1)

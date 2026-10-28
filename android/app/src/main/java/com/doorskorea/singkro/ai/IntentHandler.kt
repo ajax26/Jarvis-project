@@ -78,13 +78,7 @@ class IntentHandler(
 }
 
 /** 기상청 단기예보 via 기상청 API허브 (apihub.kma.go.kr, VilageFcstInfoService_2.0). */
-class WeatherSource(private val authKey: String) {
-    // shortcut: fixed KMA grid for major cities; add lat/lon -> grid (LCC) conversion to support any location
-    private val grid = mapOf(
-        "서울" to (60 to 127), "부산" to (98 to 76), "대구" to (89 to 90), "인천" to (55 to 124),
-        "광주" to (58 to 74), "대전" to (67 to 100), "울산" to (102 to 84), "세종" to (66 to 103),
-        "수원" to (60 to 121), "제주" to (52 to 38),
-    )
+class WeatherSource(private val authKey: String, private val grid: KmaGrid) {
     private val kst = ZoneId.of("Asia/Seoul")
     private val ymd = DateTimeFormatter.BASIC_ISO_DATE
     private val skyText = mapOf("1" to "맑고", "3" to "구름이 많고", "4" to "흐리고")
@@ -92,8 +86,8 @@ class WeatherSource(private val authKey: String) {
 
     /** Returns a one-line summary, or null if the location is not supported. */
     suspend fun fetch(location: String, date: String): String? = withContext(Dispatchers.IO) {
-        val (city, xy) = grid.entries.firstOrNull { location.startsWith(it.key) }?.toPair()
-            ?: return@withContext null
+        val xy = grid.resolve(location) ?: return@withContext null
+        val city = location // spoken back as the user said it
 
         // forecasts are issued at 02,05,...,23h and published ~10 minutes later
         val now = LocalDateTime.now(kst).minusMinutes(15)

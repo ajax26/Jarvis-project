@@ -29,8 +29,11 @@ android {
 
     buildFeatures { buildConfig = true }
 
-    // intent eval cases shared with pc-test/
+    // shared with pc-test/: intent eval cases, region -> KMA grid table
     sourceSets["main"].assets.srcDir("../../eval")
+    sourceSets["main"].assets.srcDir("../../data")
+    // data/ also holds the 기상청 source xlsx/docx and the build script; ship only the json
+    androidResources { ignoreAssetsPatterns += listOf("*.xlsx", "*.docx", "*.py") }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

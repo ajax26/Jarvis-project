@@ -17,7 +17,7 @@ action별 필드:
 - CHITCHAT: reply(짧은 한국어 답변)
 
 규칙:
-- 지역이 없으면 location은 "서울".
+- 지역이 없으면 location은 "서울". 지역이 있으면 시, 구, 동 이름을 말한 그대로 넣는다.
 - 날짜가 없으면 date는 "today".
 - 뉴스 분야가 없으면 category는 "GENERAL".
 - 노래를 찾거나 목록을 보여 달라면 SEARCH_SONG, 노래를 부르거나 틀어/재생/예약해 달라면 PLAY_SONG.

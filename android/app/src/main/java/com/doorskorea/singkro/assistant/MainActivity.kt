@@ -1,7 +1,9 @@
 package com.doorskorea.singkro.assistant
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -17,8 +19,11 @@ import com.doorskorea.singkro.ai.AssistantIntent
 import com.doorskorea.singkro.ai.IntentHandler
 import com.doorskorea.singkro.ai.IntentParser
 import com.doorskorea.singkro.ai.IntentPrompt
+import com.doorskorea.singkro.ai.KmaGrid
 import com.doorskorea.singkro.ai.LlmEngine
 import com.doorskorea.singkro.ai.ModelFamily
+import com.doorskorea.singkro.ai.SpeechInput
+import com.doorskorea.singkro.ai.SpeechOutput
 import com.doorskorea.singkro.ai.WeatherSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.MainScope
@@ -40,6 +45,9 @@ class MainActivity : Activity() {
     private lateinit var input: EditText
     private lateinit var log: TextView
     private lateinit var handler: IntentHandler
+    private lateinit var speechIn: SpeechInput
+    private lateinit var speechOut: SpeechOutput
+    private var readyText = ""
 
     private val modelFile get() = File(getExternalFilesDir(null), "model.task")
 
@@ -49,7 +57,9 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handler = IntentHandler(this, family, WeatherSource(BuildConfig.KMA_AUTH_KEY))
+        handler = IntentHandler(this, family, WeatherSource(BuildConfig.KMA_AUTH_KEY, KmaGrid(assets.open("kma_grid.json").bufferedReader().use { it.readText() })))
+        speechIn = SpeechInput(this)
+        speechOut = SpeechOutput(this)
 
         val pad = (16 * resources.displayMetrics.density).toInt()
         status = TextView(this)
@@ -57,7 +67,7 @@ class MainActivity : Activity() {
             hint = "예: 아이유 좋은날 틀어줘"
             isSingleLine = true
             imeOptions = EditorInfo.IME_ACTION_SEND
-            setOnEditorActionListener { _, id, _ -> (id == EditorInfo.IME_ACTION_SEND).also { if (it) ask() } }
+            setOnEditorActionListener { _, id, _ -> (id == EditorInfo.IME_ACTION_SEND).also { if (it) sendInput() } }
         }
         log = TextView(this).apply { setTextIsSelectable(true) }
 
@@ -66,8 +76,9 @@ class MainActivity : Activity() {
             setPadding(pad, pad, pad, pad)
             addView(status)
             addView(LinearLayout(context).apply {
+                addView(Button(context).apply { text = "말하기"; setOnClickListener { onMic() } })
                 addView(input, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-                addView(Button(context).apply { text = "보내기"; setOnClickListener { ask() } })
+                addView(Button(context).apply { text = "보내기"; setOnClickListener { sendInput() } })
                 addView(Button(context).apply { text = "평가 실행"; setOnClickListener { runEval() } })
             })
             addView(ScrollView(context).apply { addView(log) }, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
@@ -87,11 +98,13 @@ class MainActivity : Activity() {
     // test hook when the app is already running (same --es ask extra)
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.getStringExtra("ask")?.let { input.setText(it); ask() }
+        intent.getStringExtra("ask")?.let { ask(it) }
     }
 
     override fun onDestroy() {
         scope.cancel()
+        speechIn.destroy()
+        speechOut.shutdown()
         super.onDestroy()
     }
 
@@ -114,10 +127,11 @@ class MainActivity : Activity() {
             val warmMs = measureTimeMillis {
                 IntentPrompt.intent("안녕", family).let { LlmEngine.generate(it.prefix, it.rest) }
             }
-            status.text = "준비 완료: ${LlmEngine.backend}, 로딩 ${ms / 1000.0}s + 준비 ${warmMs / 1000.0}s"
+            readyText = "준비 완료: ${LlmEngine.backend}, 로딩 ${ms / 1000.0}s + 준비 ${warmMs / 1000.0}s, 음성인식 ${speechIn.engine}"
+            status.text = readyText
             Log.i(TAG, "warm-up ms=$warmMs")
             // test hook (adb can't type Korean): adb shell am start ... --es ask "내일 부산 비 와?"
-            intent.getStringExtra("ask")?.let { input.setText(it); ask() }
+            intent.getStringExtra("ask")?.let { ask(it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -126,16 +140,52 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun ask() {
+    private fun sendInput() {
         val text = input.text.toString().trim()
-        if (text.isEmpty() || !LlmEngine.isReady) return
+        if (text.isEmpty()) return
         input.text.clear()
+        ask(text)
+    }
+
+    private fun onMic() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) listen()
+        else requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_MIC)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_MIC && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) listen()
+    }
+
+    private fun listen() {
+        if (!LlmEngine.isReady) return
+        if (!speechIn.isAvailable) {
+            append("음성 인식 엔진이 없습니다.\n")
+            return
+        }
+        speechOut.stop()
+        scope.launch {
+            status.text = "듣는 중..."
+            val text = speechIn.listen { partial -> status.text = "듣는 중: $partial" }
+            status.text = readyText
+            if (text.isNullOrBlank()) {
+                append("  (음성 인식 실패: 오류 ${speechIn.lastError}, ${speechIn.engine})\n")
+                speechOut.speak("잘 못 들었어요. 다시 말씀해 주세요.")
+            } else {
+                ask(text)
+            }
+        }
+    }
+
+    private fun ask(text: String) {
+        if (!LlmEngine.isReady) return
         scope.launch {
             try {
                 val reply: IntentHandler.Reply
                 val ms = measureTimeMillis { reply = handler.handle(text) }
                 append("> $text\n  intent: ${reply.intent}\n  (${ms} ms) ${reply.text}\n")
                 Log.i(TAG, "ask \"$text\" -> ${reply.intent} (${ms} ms): ${reply.text}")
+                speechOut.speak(reply.text)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -194,5 +244,6 @@ class MainActivity : Activity() {
     private companion object {
         const val TAG = "SingkroMain"
         const val EVAL_TAG = "SingkroEval"
+        const val REQ_MIC = 1
     }
 }
